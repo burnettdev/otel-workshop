@@ -109,7 +109,9 @@ The services show three ways of getting OpenTelemetry data into Dash0:
 
 **OpenTelemetry SDK in code**, because the operator can't instrument Go.
 
-- `inventory-go` (Go 1.26): the OTel Go SDK, `otelhttp` for the server spans and `otelsql` for the database spans. It takes its OTLP endpoint and protocol from the environment variables the operator injects, so its manifest only sets `OTEL_SERVICE_NAME`. Logs are JSON from `log/slog`, with `trace_id` and `span_id` added by a small handler.
+- `inventory-go` (Go 1.26): the OTel Go SDK, `otelhttp` for the server spans and `otelsql` for the database spans. It takes its OTLP endpoint and protocol from the environment variables the operator injects. The operator's injector can't load into a static Go binary, so the manifest supplies what it would otherwise add: `OTEL_SERVICE_NAME`, and `OTEL_RESOURCE_ATTRIBUTES=service.namespace=…` read from the pod's own `app.kubernetes.io/part-of` label through the downward API, the same label the operator uses for the other services. Logs are JSON from `log/slog`, with `trace_id` and `span_id` added by a small handler.
+
+  **Kubernetes attributes for Go.** The operator adds `k8s.*` attributes to the other services through its injector, a preloaded library that doesn't load into a static, libc-free Go binary. For inventory-go, the node collector's `k8s_attributes` processor has to recognise the pod from the connection's source IP instead. That fails when telemetry goes to the collector's host port: on clusters where host-port traffic is source-NATed (k3s with flannel, for example), the collector sees the bridge gateway, not the pod. Install the operator with `operator.collectors.forceUseServiceUrl=true`. The operator then injects the collector's node-local Service URL (`internalTrafficPolicy: Local`) instead of the host port, the pod IP is preserved, and the collector adds the pod, namespace, deployment and node attributes. Restart the workloads afterwards so they pick up the new endpoint.
 
 All services log one JSON object per line with `level`, `message`, `trace_id` and `span_id`, which the transform in `base/` turns into trace-linked log records.
 
@@ -161,14 +163,15 @@ REPO=https://github.com/your-org/otel-workshop   # your copy of this repository
 docker buildx build --platform linux/amd64 --build-arg VCS_REVISION=$REV --build-arg VCS_REPOSITORY_URL=$REPO -t REGISTRY/otel-workshop/shop-php:0.3.2 --push shop-php/image
 docker buildx build --platform linux/amd64 --build-arg VCS_REVISION=$REV --build-arg VCS_REPOSITORY_URL=$REPO -t REGISTRY/otel-workshop/pricing-py:0.1.1 --push pricing-py/image
 docker buildx build --platform linux/amd64 --build-arg VCS_REVISION=$REV --build-arg VCS_REPOSITORY_URL=$REPO -t REGISTRY/otel-workshop/recommendations-node:0.1.2 --push recommendations-node/image
-docker buildx build --platform linux/amd64 --build-arg VCS_REVISION=$REV --build-arg VCS_REPOSITORY_URL=$REPO -t REGISTRY/otel-workshop/inventory-go:0.1.2 --push inventory-go/image
+docker buildx build --platform linux/amd64 --build-arg VCS_REVISION=$REV --build-arg VCS_REPOSITORY_URL=$REPO -t REGISTRY/otel-workshop/inventory-go:0.1.3 --push inventory-go/image
 docker buildx build --platform linux/amd64 --build-arg VCS_REVISION=$REV --build-arg VCS_REPOSITORY_URL=$REPO -t REGISTRY/otel-workshop/payment-java:0.1.1 --push payment-java/image
 docker buildx build --platform linux/amd64 --build-arg VCS_REVISION=$REV --build-arg VCS_REPOSITORY_URL=$REPO -t REGISTRY/otel-workshop/shop-web:0.2.2 --push shop-web/image
 ```
 
 **Version-control attributes.** The two build args end up in the telemetry, so every span, log and metric says which commit and repository it came from:
 
-- The five backend images set `OTEL_RESOURCE_ATTRIBUTES=vcs.ref.head.revision=<commit>,vcs.repository.url.full=<repo>`. Every OpenTelemetry SDK reads that variable, including the Java and Node.js agents the Dash0 operator injects. The operator appends its own `k8s.*` and `service.*` attributes to the variable rather than replacing it. Don't set `OTEL_RESOURCE_ATTRIBUTES` in a manifest: a container env var replaces the image's value instead of merging with it.
+- shop-php, pricing-py, recommendations-node and payment-java set `OTEL_RESOURCE_ATTRIBUTES=vcs.ref.head.revision=<commit>,vcs.repository.url.full=<repo>` in the image. Every OpenTelemetry SDK reads that variable, including the Java and Node.js agents the Dash0 operator injects. The operator appends its own `k8s.*` and `service.*` attributes to the variable rather than replacing it. Don't set `OTEL_RESOURCE_ATTRIBUTES` in those manifests: a container env var replaces the image's value instead of merging with it.
+- inventory-go compiles the values into the binary (`go build -ldflags -X`) and adds them in code, because its manifest needs `OTEL_RESOURCE_ATTRIBUTES` for `service.namespace` (see "How the services are instrumented").
 - shop-web passes the same values to the browser SDK as `additionalSignalAttributes`. In the browser they're attributes on each signal, because the Web SDK doesn't take custom resource attributes.
 - The images also get the standard `org.opencontainers.image.revision` and `org.opencontainers.image.source` labels.
 

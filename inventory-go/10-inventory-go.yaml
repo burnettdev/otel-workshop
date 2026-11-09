@@ -1,5 +1,5 @@
-# inventory-go uses the OpenTelemetry Go SDK (the operator can't instrument Go). It only sets service.name;
-# the OTLP endpoint and protocol come from the environment variables the operator injects.
+# inventory-go uses the OpenTelemetry Go SDK (the operator can't instrument Go). It sets service.name and
+# service.namespace; the OTLP endpoint and protocol come from the environment variables the operator injects.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -21,7 +21,7 @@ spec:
     spec:
       containers:
         - name: inventory-go
-          image: REGISTRY/otel-workshop/inventory-go:0.1.2
+          image: REGISTRY/otel-workshop/inventory-go:0.1.3
           ports:
             - name: http
               containerPort: 8080
@@ -38,6 +38,14 @@ spec:
                 secretKeyRef: { name: mysql, key: password }
             - name: OTEL_SERVICE_NAME
               value: inventory-go
+            # The operator's injector sets service.namespace from the app.kubernetes.io/part-of label for the other
+            # services, but can't load into this static binary, so derive it from the same label here.
+            - name: SERVICE_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.labels['app.kubernetes.io/part-of']
+            - name: OTEL_RESOURCE_ATTRIBUTES
+              value: service.namespace=$(SERVICE_NAMESPACE)
           readinessProbe:
             tcpSocket: { port: http }
             periodSeconds: 5
