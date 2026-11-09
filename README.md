@@ -158,12 +158,12 @@ All six services are built from their `image/` folders; no prebuilt images are p
 REV=$(git rev-parse HEAD)
 REPO=https://github.com/your-org/otel-workshop   # your copy of this repository
 
-docker buildx build --platform linux/amd64 --build-arg VCS_REVISION=$REV --build-arg VCS_REPOSITORY_URL=$REPO -t REGISTRY/otel-workshop/shop-php:0.3.1 --push shop-php/image
-docker buildx build --platform linux/amd64 --build-arg VCS_REVISION=$REV --build-arg VCS_REPOSITORY_URL=$REPO -t REGISTRY/otel-workshop/pricing-py:0.1.0 --push pricing-py/image
-docker buildx build --platform linux/amd64 --build-arg VCS_REVISION=$REV --build-arg VCS_REPOSITORY_URL=$REPO -t REGISTRY/otel-workshop/recommendations-node:0.1.1 --push recommendations-node/image
-docker buildx build --platform linux/amd64 --build-arg VCS_REVISION=$REV --build-arg VCS_REPOSITORY_URL=$REPO -t REGISTRY/otel-workshop/inventory-go:0.1.1 --push inventory-go/image
-docker buildx build --platform linux/amd64 --build-arg VCS_REVISION=$REV --build-arg VCS_REPOSITORY_URL=$REPO -t REGISTRY/otel-workshop/payment-java:0.1.0 --push payment-java/image
-docker buildx build --platform linux/amd64 --build-arg VCS_REVISION=$REV --build-arg VCS_REPOSITORY_URL=$REPO -t REGISTRY/otel-workshop/shop-web:0.2.1 --push shop-web/image
+docker buildx build --platform linux/amd64 --build-arg VCS_REVISION=$REV --build-arg VCS_REPOSITORY_URL=$REPO -t REGISTRY/otel-workshop/shop-php:0.3.2 --push shop-php/image
+docker buildx build --platform linux/amd64 --build-arg VCS_REVISION=$REV --build-arg VCS_REPOSITORY_URL=$REPO -t REGISTRY/otel-workshop/pricing-py:0.1.1 --push pricing-py/image
+docker buildx build --platform linux/amd64 --build-arg VCS_REVISION=$REV --build-arg VCS_REPOSITORY_URL=$REPO -t REGISTRY/otel-workshop/recommendations-node:0.1.2 --push recommendations-node/image
+docker buildx build --platform linux/amd64 --build-arg VCS_REVISION=$REV --build-arg VCS_REPOSITORY_URL=$REPO -t REGISTRY/otel-workshop/inventory-go:0.1.2 --push inventory-go/image
+docker buildx build --platform linux/amd64 --build-arg VCS_REVISION=$REV --build-arg VCS_REPOSITORY_URL=$REPO -t REGISTRY/otel-workshop/payment-java:0.1.1 --push payment-java/image
+docker buildx build --platform linux/amd64 --build-arg VCS_REVISION=$REV --build-arg VCS_REPOSITORY_URL=$REPO -t REGISTRY/otel-workshop/shop-web:0.2.2 --push shop-web/image
 ```
 
 **Version-control attributes.** The two build args end up in the telemetry, so every span, log and metric says which commit and repository it came from:
