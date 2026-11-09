@@ -2,7 +2,10 @@
 //
 // The Dash0 operator can't instrument Go, so this service uses the OpenTelemetry Go SDK directly.
 // The OTLP endpoint and protocol come from the environment variables the operator injects
-// (OTEL_EXPORTER_OTLP_ENDPOINT, OTEL_EXPORTER_OTLP_PROTOCOL), and service.name from OTEL_SERVICE_NAME.
+// (OTEL_EXPORTER_OTLP_ENDPOINT, OTEL_EXPORTER_OTLP_PROTOCOL). Because the operator's injector can't load into
+// a static Go binary, the resource attributes it would add for other services come from elsewhere:
+// service.namespace from OTEL_RESOURCE_ATTRIBUTES (set in the manifest), the VCS details from build-time
+// variables, and the k8s.* attributes from the node collector, which matches the pod by its IP.
 package main
 
 import (
@@ -30,6 +33,12 @@ import (
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	semconv "go.opentelemetry.io/otel/semconv/v1.43.0"
 	"go.opentelemetry.io/otel/trace"
+)
+
+// Version-control details, set at build time with -ldflags -X (see Dockerfile).
+var (
+	vcsRevision      = "unknown"
+	vcsRepositoryURL = "unknown"
 )
 
 // traceHandler adds the active trace and span IDs to every JSON log line, so logs correlate with traces.
@@ -74,7 +83,14 @@ func setupTracing(ctx context.Context) (func(context.Context) error, error) {
 	if err != nil {
 		return nil, err
 	}
-	res, err := sdkresource.Merge(sdkresource.Default(), sdkresource.NewSchemaless(semconv.ServiceName("inventory-go")))
+	// Default() reads OTEL_RESOURCE_ATTRIBUTES, where the manifest sets service.namespace. The VCS details are
+	// compiled in rather than set in the image environment, so the manifest can set OTEL_RESOURCE_ATTRIBUTES
+	// without replacing them.
+	res, err := sdkresource.Merge(sdkresource.Default(), sdkresource.NewSchemaless(
+		semconv.ServiceName("inventory-go"),
+		semconv.VCSRefHeadRevision(vcsRevision),
+		semconv.VCSRepositoryURLFull(vcsRepositoryURL),
+	))
 	if err != nil {
 		return nil, err
 	}
