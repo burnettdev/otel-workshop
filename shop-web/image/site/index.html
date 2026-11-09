@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Maker Supply</title>
+  <!-- Empty icon, so the browser doesn't request /favicon.ico and log a 404. -->
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="/style.css">
+  <!-- Dash0 Web SDK: config, then the command-queue initializer, then the deferred SDK and recorder bundles. -->
+  <script src="/dash0-config.js"></script>
+  <script src="/dash0-init.js"></script>
+  <script defer src="/vendor/dash0.iife.js"></script>
+  <script defer src="/vendor/dash0-session-recording.iife.js"></script>
+  <script defer src="/app.js"></script>
+</head>
+<body>
+  <header class="site-header">
+    <div class="wrap header-inner">
+      <a href="/" class="brand" data-link>Maker Supply</a>
+      <nav>
+        <a href="/" data-link>Shop</a>
+        <a href="/cart" data-link class="cart-link">Cart <span id="cart-count" class="badge">0</span></a>
+      </nav>
+    </div>
+  </header>
+  <main id="app" class="wrap" aria-live="polite"></main>
+  <footer class="site-footer">
+    <div class="wrap">
+      Demo shop for an OpenTelemetry workshop. Nothing here is for sale.
+      <a href="/lab" data-link>Workshop lab</a>
+    </div>
+  </footer>
+</body>
+</html>

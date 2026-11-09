@@ -1,0 +1,57 @@
+# No OpenTelemetry settings: the Dash0 operator adds the Java agent (JAVA_TOOL_OPTIONS), the OTLP endpoint,
+# and service.name (from the app.kubernetes.io/name label).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: payment-java
+  namespace: otel-workshop
+  labels:
+    app.kubernetes.io/name: payment-java
+    app.kubernetes.io/part-of: otel-workshop
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: payment-java
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: payment-java
+        app.kubernetes.io/part-of: otel-workshop
+    spec:
+      containers:
+        - name: payment-java
+          image: REGISTRY/otel-workshop/payment-java:0.1.0
+          ports:
+            - name: http
+              containerPort: 8080
+          envFrom:
+            - configMapRef:
+                name: payment-java-flags
+          # Keep serving while the pod is removed from the Service endpoints during restarts.
+          lifecycle:
+            preStop:
+              exec:
+                command: ["sleep", "5"]
+          readinessProbe:
+            tcpSocket: { port: http }
+            initialDelaySeconds: 10
+            periodSeconds: 5
+          resources:
+            requests: { cpu: 100m, memory: 256Mi }
+            limits: { memory: 512Mi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: payment-java
+  namespace: otel-workshop
+  labels:
+    app.kubernetes.io/name: payment-java
+spec:
+  selector:
+    app.kubernetes.io/name: payment-java
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http

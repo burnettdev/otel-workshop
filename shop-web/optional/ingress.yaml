@@ -1,0 +1,27 @@
+# Optional: expose shop-web through the cluster's Traefik ingress. Not applied by default (kubectl apply -f
+# shop-web/ doesn't read this folder). Before applying:
+#  - point DNS for the host at the Traefik load balancer, and
+#  - create a TLS secret named shop-web-tls in otel-workshop (e.g. with cert-manager), and
+#  - replace shop.example.com with your hostname and traefik with your ingress class if needed.
+# Serve it over HTTPS: browsers only treat http://localhost as a secure context, not plain-HTTP hostnames.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: shop-web
+  namespace: otel-workshop
+spec:
+  ingressClassName: traefik
+  tls:
+    - hosts: [shop.example.com]
+      secretName: shop-web-tls
+  rules:
+    - host: shop.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: shop-web
+                port:
+                  name: http

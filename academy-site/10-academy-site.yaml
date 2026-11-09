@@ -1,0 +1,87 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: academy-site
+  namespace: otel-workshop
+data:
+  index.html: |
+    <!doctype html>
+    <html><head><title>Academy (demo)</title></head>
+    <body><h1>Academy (demo)</h1><p>Course material lives in <a href="/uploads/">/uploads/</a>.</p></body></html>
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: academy-site
+  namespace: otel-workshop
+  labels:
+    app.kubernetes.io/name: academy-site
+    app.kubernetes.io/part-of: otel-workshop
+spec:
+  replicas: 1
+  # Recreate, not RollingUpdate: with an exclusive volume a rolling update deadlocks, because the
+  # new pod can't start until the old one releases the claim.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: academy-site
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: academy-site
+        app.kubernetes.io/part-of: otel-workshop
+    spec:
+      initContainers:
+        # Seed a few files on first start so uploads-sync has something to archive.
+        - name: seed-uploads
+          image: busybox:1.37
+          command: ["sh", "-c"]
+          args:
+            - |
+              [ -n "$(ls -A /uploads)" ] && exit 0
+              for i in 1 2 3 4 5; do head -c 200000 /dev/urandom > /uploads/lesson-$i.pdf; done
+              echo "seeded $(ls /uploads | wc -l) files"
+          volumeMounts:
+            - name: uploads
+              mountPath: /uploads
+      containers:
+        - name: nginx
+          image: nginx:1.27-alpine
+          ports:
+            - name: http
+              containerPort: 80
+          readinessProbe:
+            tcpSocket: { port: http }
+            periodSeconds: 5
+          resources:
+            requests: { cpu: 10m, memory: 16Mi }
+            limits: { memory: 64Mi }
+          volumeMounts:
+            - name: uploads
+              mountPath: /usr/share/nginx/html/uploads
+            - name: site
+              mountPath: /usr/share/nginx/html/index.html
+              subPath: index.html
+      volumes:
+        - name: uploads
+          persistentVolumeClaim:
+            claimName: uploads
+        - name: site
+          configMap:
+            name: academy-site
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: academy-site
+  namespace: otel-workshop
+  labels:
+    app.kubernetes.io/name: academy-site
+spec:
+  selector:
+    app.kubernetes.io/name: academy-site
+  ports:
+    - name: http
+      port: 80
+      targetPort: http

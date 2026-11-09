@@ -1,0 +1,10 @@
+# Feature flags for shop-php, loaded as environment variables. Changing a value needs a pod restart;
+# ./shop-php/slow-checkout.sh does both.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: shop-php-flags
+  namespace: otel-workshop
+data:
+  # "true" makes every /checkout run the slow SQL query (SELECT SLEEP(2)) inside the shipping.quote span.
+  CHECKOUT_SLOW_QUERY: "false"

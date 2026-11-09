@@ -1,0 +1,61 @@
+# inventory-go uses the OpenTelemetry Go SDK (the operator can't instrument Go). It only sets service.name;
+# the OTLP endpoint and protocol come from the environment variables the operator injects.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: inventory-go
+  namespace: otel-workshop
+  labels:
+    app.kubernetes.io/name: inventory-go
+    app.kubernetes.io/part-of: otel-workshop
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: inventory-go
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: inventory-go
+        app.kubernetes.io/part-of: otel-workshop
+    spec:
+      containers:
+        - name: inventory-go
+          image: REGISTRY/otel-workshop/inventory-go:0.1.1
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            - name: DB_HOST
+              value: mysql
+            - name: DB_NAME
+              value: shop
+            - name: DB_USER
+              valueFrom:
+                secretKeyRef: { name: mysql, key: user }
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: mysql, key: password }
+            - name: OTEL_SERVICE_NAME
+              value: inventory-go
+          readinessProbe:
+            tcpSocket: { port: http }
+            periodSeconds: 5
+          resources:
+            requests: { cpu: 10m, memory: 16Mi }
+            limits: { memory: 64Mi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: inventory-go
+  namespace: otel-workshop
+  labels:
+    app.kubernetes.io/name: inventory-go
+spec:
+  selector:
+    app.kubernetes.io/name: inventory-go
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http

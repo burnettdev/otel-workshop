@@ -1,0 +1,54 @@
+# Synced into Dash0 check rules by the Dash0 operator (synchronizePrometheusRules in base/10-dash0-monitoring.yaml).
+# Check rule names become "<group name> - <alert>". Sync results are reported in the Dash0Monitoring status.
+#
+# Metric naming: OTel metrics are selected with otel_metric_name/otel_metric_type, and dots in attribute names
+# become underscores (k8s.job.name -> k8s_job_name). Metrics come from the operator's k8s_cluster receiver;
+# k8s_job_name on pod metrics is added by its k8s_attributes processor.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: otel-workshop-jobs
+  namespace: otel-workshop
+  labels:
+    app.kubernetes.io/part-of: otel-workshop
+spec:
+  groups:
+    - name: otel-workshop jobs
+      interval: 1m
+      rules:
+        # k8s.pod.phase: 1 = Pending, 2 = Running, 3 = Succeeded, 4 = Failed, 5 = Unknown.
+        # Only pods owned by a Job carry a non-empty k8s_job_name.
+        - alert: JobPodPending
+          expr: |
+            max by (k8s_namespace_name, k8s_job_name, k8s_pod_name) (
+              {otel_metric_name="k8s.pod.phase", otel_metric_type="gauge", k8s_namespace_name="otel-workshop", k8s_job_name!=""}
+            ) == 1
+          for: 10m
+          labels:
+            env: prod
+          annotations:
+            summary: "Job pod {{ $labels.k8s_pod_name }} has been Pending for more than 10 minutes"
+            description: >-
+              Pod {{ $labels.k8s_pod_name }} of Job {{ $labels.k8s_job_name }} in {{ $labels.k8s_namespace_name }}
+              can't start. Check its events: a FailedScheduling or FailedAttachVolume warning usually means another
+              pod holds a volume it needs (for uploads-sync, the academy-site pod holding the uploads PVC).
+
+        # Approximates "didn't complete within 15 minutes of its schedule": a CronJob creates its Job at the
+        # scheduled time, and k8s.job.active_pods counts the Job's Pending and Running pods, so > 0 for 15m means
+        # the run is still unfinished 15 minutes after it started. Uses the Job metric rather than
+        # k8s.cronjob.active_jobs because the CronJob doesn't count jobs created with
+        # `kubectl create job --from=cronjob/...` as active.
+        # Doesn't detect runs that never started (e.g. skipped by concurrencyPolicy: Forbid).
+        - alert: CronJobRunNotCompleted
+          expr: |
+            max by (k8s_namespace_name, k8s_job_name) (
+              {otel_metric_name="k8s.job.active_pods", otel_metric_type="gauge", k8s_namespace_name="otel-workshop", k8s_job_name=~"uploads-sync-.+"}
+            ) > 0
+          for: 15m
+          labels:
+            env: prod
+          annotations:
+            summary: "uploads-sync run {{ $labels.k8s_job_name }} hasn't completed 15 minutes after it started"
+            description: >-
+              Job {{ $labels.k8s_job_name }} from CronJob uploads-sync in {{ $labels.k8s_namespace_name }} still has
+              {{ $value }} active pod(s) after 15 minutes. A healthy run takes about 90 seconds.

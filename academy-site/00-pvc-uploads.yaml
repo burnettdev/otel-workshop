@@ -1,0 +1,16 @@
+# ReadWriteOncePod instead of ReadWriteOnce: a single-node cluster or node-local storage (e.g. k3s local-path)
+# never produces a Multi-Attach error (no attach step, and RWO allows sharing on one node).
+# RWOP makes the scheduler refuse a second pod while academy-site holds the claim, which gives the
+# same "job stuck in Pending" incident. See README for the multi-node / attachable-storage variant.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: uploads
+  namespace: otel-workshop
+  labels:
+    app.kubernetes.io/part-of: otel-workshop
+spec:
+  accessModes: [ReadWriteOncePod]
+  resources:
+    requests:
+      storage: 100Mi

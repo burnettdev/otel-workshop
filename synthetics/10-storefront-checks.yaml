@@ -1,0 +1,174 @@
+# Synthetic checks against the storefront, synced into Dash0 by the operator (the namespace's Dash0Monitoring
+# resource must exist). The URLs are in-cluster service names, so the checks must run from a private location:
+# a Dash0 synthetics worker running in this cluster. Replace YOUR_LOCATION_ID with that location's ID
+# (see README, "Synthetic checks").
+apiVersion: operator.dash0.com/v1alpha1
+kind: Dash0SyntheticCheck
+metadata:
+  name: storefront-home
+  namespace: otel-workshop
+  annotations:
+    dash0.com/folder-path: "/otel-workshop"
+spec:
+  enabled: true
+  display:
+    name: "Storefront: home page"
+  labels:
+    env: prod
+  notifications:
+    channels: []
+  schedule:
+    interval: 1m
+    strategy: all_locations
+    locations:
+      - YOUR_LOCATION_ID
+  retries:
+    kind: fixed
+    spec:
+      attempts: 2
+      delay: 5s
+  plugin:
+    kind: http
+    spec:
+      request:
+        method: get
+        url: http://shop-web.otel-workshop.svc.cluster.local/
+        headers: []
+        queryParameters: []
+        redirects: follow
+        tls:
+          allowInsecure: false
+        # Sends a traceparent header, so each run links to the trace it starts in the backend.
+        tracing:
+          addTracingHeaders: true
+      assertions:
+        criticalAssertions:
+          - kind: status_code
+            spec:
+              operator: is
+              value: "200"
+          - kind: timing
+            spec:
+              type: response
+              operator: lte
+              value: 3000ms
+        degradedAssertions:
+          - kind: timing
+            spec:
+              type: response
+              operator: lte
+              value: 1000ms
+---
+apiVersion: operator.dash0.com/v1alpha1
+kind: Dash0SyntheticCheck
+metadata:
+  name: storefront-products-api
+  namespace: otel-workshop
+  annotations:
+    dash0.com/folder-path: "/otel-workshop"
+spec:
+  enabled: true
+  display:
+    name: "Storefront: product catalogue API"
+  labels:
+    env: prod
+  notifications:
+    channels: []
+  schedule:
+    interval: 1m
+    strategy: all_locations
+    locations:
+      - YOUR_LOCATION_ID
+  retries:
+    kind: fixed
+    spec:
+      attempts: 2
+      delay: 5s
+  plugin:
+    kind: http
+    spec:
+      request:
+        method: get
+        url: http://shop-web.otel-workshop.svc.cluster.local/api/products
+        headers: []
+        queryParameters: []
+        redirects: follow
+        tls:
+          allowInsecure: false
+        # Sends a traceparent header, so each run links to the trace it starts in the backend.
+        tracing:
+          addTracingHeaders: true
+      assertions:
+        criticalAssertions:
+          - kind: status_code
+            spec:
+              operator: is
+              value: "200"
+          - kind: timing
+            spec:
+              type: response
+              operator: lte
+              value: 3000ms
+        degradedAssertions:
+          - kind: timing
+            spec:
+              type: response
+              operator: lte
+              value: 1000ms
+---
+apiVersion: operator.dash0.com/v1alpha1
+kind: Dash0SyntheticCheck
+metadata:
+  name: storefront-checkout
+  namespace: otel-workshop
+  annotations:
+    dash0.com/folder-path: "/otel-workshop"
+spec:
+  enabled: true
+  display:
+    name: "Storefront: synthetic checkout"
+  labels:
+    env: prod
+  notifications:
+    channels: []
+  schedule:
+    interval: 1m
+    strategy: all_locations
+    locations:
+      - YOUR_LOCATION_ID
+  retries:
+    kind: fixed
+    spec:
+      attempts: 2
+      delay: 5s
+  plugin:
+    kind: http
+    spec:
+      request:
+        method: get
+        url: http://shop-web.otel-workshop.svc.cluster.local/api/checkout
+        headers: []
+        queryParameters: []
+        redirects: follow
+        tls:
+          allowInsecure: false
+        # Sends a traceparent header, so each run links to the trace it starts in the backend.
+        tracing:
+          addTracingHeaders: true
+      assertions:
+        criticalAssertions:
+          - kind: status_code
+            spec:
+              operator: is
+              value: "200"
+          - kind: timing
+            spec:
+              type: response
+              operator: lte
+              value: 5000ms
+        degradedAssertions:
+          - kind: timing
+            spec:
+              type: response
+              operator: lte
+              value: 2000ms

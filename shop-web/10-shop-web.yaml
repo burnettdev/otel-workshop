@@ -1,0 +1,58 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: shop-web
+  namespace: otel-workshop
+  labels:
+    app.kubernetes.io/name: shop-web
+    app.kubernetes.io/part-of: otel-workshop
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: shop-web
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: shop-web
+        app.kubernetes.io/part-of: otel-workshop
+    spec:
+      containers:
+        - name: nginx
+          image: REGISTRY/otel-workshop/shop-web:0.2.1
+          ports:
+            - name: http
+              containerPort: 80
+          env:
+            # Dash0 OTLP/HTTP endpoint for the browser SDK, without /v1/...; also allowed in the CSP connect-src.
+            # Replace YOUR_REGION with your Dash0 region. Must match the organization of the auth token in shop-web-dash0.
+            - name: DASH0_OTLP_ENDPOINT
+              value: https://ingress.YOUR_REGION.aws.dash0.com
+            # Must be the same dataset the Dash0 operator exports to (Dash0OperatorConfiguration spec.exports),
+            # or browser spans and backend spans land in different datasets and traces don't join up.
+            - name: DASH0_DATASET
+              value: YOUR_DATASET
+            - name: DASH0_AUTH_TOKEN
+              valueFrom:
+                secretKeyRef: { name: shop-web-dash0, key: DASH0_AUTH_TOKEN }
+          readinessProbe:
+            tcpSocket: { port: http }
+            periodSeconds: 5
+          resources:
+            requests: { cpu: 10m, memory: 16Mi }
+            limits: { memory: 64Mi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: shop-web
+  namespace: otel-workshop
+  labels:
+    app.kubernetes.io/name: shop-web
+spec:
+  selector:
+    app.kubernetes.io/name: shop-web
+  ports:
+    - name: http
+      port: 80
+      targetPort: http

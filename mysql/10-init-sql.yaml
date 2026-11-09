@@ -1,0 +1,28 @@
+# Runs once on first start of an empty data directory (docker-entrypoint-initdb.d).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mysql-init
+  namespace: otel-workshop
+data:
+  01-schema.sql: |
+    CREATE TABLE products (
+      id          INT PRIMARY KEY,
+      name        VARCHAR(100) NOT NULL,
+      price_cents INT NOT NULL,
+      weight_g    INT NOT NULL,
+      stock       INT NOT NULL
+    );
+    INSERT INTO products (id, name, price_cents, weight_g, stock) VALUES
+      (1,  'PLA filament 1kg, Galaxy Black',      2499, 1250, 120),
+      (2,  'PETG filament 1kg, Orange',     2799, 1250,  80),
+      (3,  'ASA filament 850g, Jet Black',        3299, 1100,  40),
+      (4,  'TPU filament 500g, Translucent',      2999,  700,  25),
+      (5,  'Nozzle 0.4mm, hardened steel',        1999,   20, 200),
+      (6,  'Nozzle 0.6mm, brass',                  899,   20, 300),
+      (7,  'Textured PEI sheet',                  4499,  450,  60),
+      (8,  'Smooth PEI sheet',                    3999,  450,  55),
+      (9,  'Spool holder',                        1499,  300,  90),
+      (10, 'Hotend silicone sock (3 pcs)',         699,   15, 500),
+      (11, 'Print fan',                           1299,   60, 150),
+      (12, 'Build plate cleaning kit',             999,  250, 110);

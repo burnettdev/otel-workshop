@@ -1,0 +1,10 @@
+# Feature flags for payment-java, loaded as environment variables. ./payment-java/payment-failures.sh changes
+# the value and restarts the service.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: payment-java-flags
+  namespace: otel-workshop
+data:
+  # Share of payments that fail with "payment provider timed out" (HTTP 502), from 0.0 to 1.0.
+  PAYMENT_FAILURE_RATE: "0"

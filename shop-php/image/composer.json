@@ -1,0 +1,33 @@
+{
+    "name": "otel-workshop/shop-php",
+    "description": "Workshop shop service: Slim 4 with OpenTelemetry auto-instrumentation.",
+    "type": "project",
+    "require": {
+        "php": "^8.3",
+        "ext-opentelemetry": "*",
+        "ext-pdo_mysql": "*",
+        "slim/slim": "^4.15",
+        "slim/psr7": "^1.8",
+        "guzzlehttp/guzzle": "^7.9",
+        "open-telemetry/sdk": "^1.16",
+        "open-telemetry/exporter-otlp": "^1.5",
+        "open-telemetry/opentelemetry-auto-slim": "^1.5",
+        "open-telemetry/opentelemetry-auto-pdo": "^0.6",
+        "open-telemetry/opentelemetry-auto-guzzle": "^1.5"
+    },
+    "autoload": {
+        "psr-4": {
+            "Shop\\": "src/"
+        }
+    },
+    "config": {
+        "platform": {
+            "php": "8.3.0"
+        },
+        "sort-packages": true,
+        "allow-plugins": {
+            "php-http/discovery": true,
+            "tbachert/spi": true
+        }
+    }
+}

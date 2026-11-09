@@ -1,0 +1,59 @@
+# No OpenTelemetry settings: the Dash0 operator injects its Node.js distribution (NODE_OPTIONS), the OTLP
+# endpoint, and service.name (from the app.kubernetes.io/name label).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: recommendations-node
+  namespace: otel-workshop
+  labels:
+    app.kubernetes.io/name: recommendations-node
+    app.kubernetes.io/part-of: otel-workshop
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: recommendations-node
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: recommendations-node
+        app.kubernetes.io/part-of: otel-workshop
+    spec:
+      containers:
+        - name: recommendations-node
+          image: REGISTRY/otel-workshop/recommendations-node:0.1.1
+          ports:
+            - name: http
+              containerPort: 3000
+          env:
+            - name: DB_HOST
+              value: mysql
+            - name: DB_NAME
+              value: shop
+            - name: DB_USER
+              valueFrom:
+                secretKeyRef: { name: mysql, key: user }
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: mysql, key: password }
+          readinessProbe:
+            tcpSocket: { port: http }
+            periodSeconds: 5
+          resources:
+            requests: { cpu: 20m, memory: 96Mi }
+            limits: { memory: 256Mi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: recommendations-node
+  namespace: otel-workshop
+  labels:
+    app.kubernetes.io/name: recommendations-node
+spec:
+  selector:
+    app.kubernetes.io/name: recommendations-node
+  ports:
+    - name: http
+      port: 3000
+      targetPort: http

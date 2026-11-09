@@ -1,0 +1,14 @@
+# Local builds and tooling
+node_modules/
+target/
+vendor/
+__pycache__/
+*.pyc
+
+# Backups left by the sed command in "Configure for your environment"
+*.bak
+
+# Editors and OS files
+.DS_Store
+.idea/
+.vscode/

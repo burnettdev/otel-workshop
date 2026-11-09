@@ -1,0 +1,35 @@
+# Enables Dash0 monitoring for the otel-workshop namespace.
+# Field reference: operator CRD operator.dash0.com/v1beta1 (operator 0.159.0) and
+# https://github.com/dash0hq/dash0-operator/blob/main/helm-chart/dash0-operator/docs/configuration.md
+# No spec.export: telemetry goes to the default export in the cluster's Dash0OperatorConfiguration.
+apiVersion: operator.dash0.com/v1beta1
+kind: Dash0Monitoring
+metadata:
+  name: dash0-monitoring-resource
+  namespace: otel-workshop
+spec:
+  instrumentWorkloads:
+    # all = instrument existing workloads (restarting their pods) plus new and updated ones.
+    mode: all
+    # Opt a single workload out by labelling it dash0.com/enable=false.
+    labelSelector: dash0.com/enable!=false
+  logCollection:
+    enabled: true
+  prometheusScraping:
+    enabled: true
+  eventCollection:
+    enabled: true
+  synchronizePersesDashboards: true
+  synchronizePrometheusRules: true
+  # shop-php and pricing-py write JSON log lines with trace_id, span_id and level fields. These statements
+  # copy them into the log record's trace context and severity, so logs link to their traces in Dash0.
+  # Non-JSON lines and Kubernetes events are left untouched.
+  transform:
+    error_mode: ignore
+    log_statements:
+      - 'set(log.trace_id.string, ParseJSON(log.body)["trace_id"]) where log.attributes["k8s.event.name"] == nil and IsString(log.body) and IsMatch(log.body, "\"trace_id\":\\s*\"[0-9a-f]{32}\"")'
+      - 'set(log.span_id.string, ParseJSON(log.body)["span_id"]) where log.attributes["k8s.event.name"] == nil and IsString(log.body) and IsMatch(log.body, "\"span_id\":\\s*\"[0-9a-f]{16}\"")'
+      - 'set(log.severity_text, ParseJSON(log.body)["level"]) where log.attributes["k8s.event.name"] == nil and IsString(log.body) and IsMatch(log.body, "\"level\":\\s*\"(INFO|WARN|WARNING|ERROR)\"")'
+      - 'set(log.severity_number, SEVERITY_NUMBER_INFO) where log.attributes["k8s.event.name"] == nil and log.severity_text == "INFO"'
+      - 'set(log.severity_number, SEVERITY_NUMBER_WARN) where log.attributes["k8s.event.name"] == nil and (log.severity_text == "WARNING" or log.severity_text == "WARN")'
+      - 'set(log.severity_number, SEVERITY_NUMBER_ERROR) where log.attributes["k8s.event.name"] == nil and log.severity_text == "ERROR"'

@@ -1,0 +1,48 @@
+# The browser sends a W3C traceparent header on same-origin /api requests. Pull the trace and span IDs out
+# so the access log line correlates with the browser's request span (see transform in base/).
+map $http_traceparent $tp_trace_id {
+    "~^00-(?<tid>[0-9a-f]{32})-[0-9a-f]{16}-[0-9a-f]{2}$" $tid;
+    default "";
+}
+map $http_traceparent $tp_span_id {
+    "~^00-[0-9a-f]{32}-(?<sid>[0-9a-f]{16})-[0-9a-f]{2}$" $sid;
+    default "";
+}
+# The path as requested, without the query string. $uri can't be used: try_files rewrites storefront routes
+# such as /product/3 to /index.html.
+map $request_uri $request_path {
+    "~^(?<path>[^?]*)" $path;
+}
+log_format json escape=json '{"time":"$time_iso8601","level":"INFO","service":"shop-web",'
+    '"message":"$request_method $request_path $status","http.request.method":"$request_method","url.path":"$request_path",'
+    '"http.response.status_code":$status,"duration_s":$request_time,'
+    '"trace_id":"$tp_trace_id","span_id":"$tp_span_id"}';
+
+server {
+    listen 80;
+    root /usr/share/nginx/html;
+    access_log /dev/stdout json;
+
+    # Scripts and styles only from this origin; telemetry only to this origin and the Dash0 ingest endpoint.
+    # No blob: worker-src: the recorder only creates a worker for canvas recording, which is off by default.
+    add_header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self' ${DASH0_OTLP_ENDPOINT}; worker-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'" always;
+    add_header X-Content-Type-Options nosniff always;
+    add_header Referrer-Policy strict-origin-when-cross-origin always;
+
+    # SDK settings, from the pod's environment. No add_header here, so the server-level headers still apply.
+    location = /dash0-config.js {
+        default_type application/javascript;
+        expires -1;
+        return 200 'window.DASH0_CONFIG = {"serviceName": "shop-web", "endpoint": {"url": "${DASH0_OTLP_ENDPOINT}", "authToken": "${DASH0_AUTH_TOKEN}", "dataset": "${DASH0_DATASET}"}};\n';
+    }
+
+    # Same-origin proxy to shop-php: /api/checkout -> http://shop-php/checkout. traceparent is passed through.
+    location /api/ {
+        proxy_pass http://shop-php.otel-workshop.svc.cluster.local/;
+        proxy_read_timeout 30s;
+    }
+
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+}

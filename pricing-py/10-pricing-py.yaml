@@ -1,0 +1,79 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pricing-py
+  namespace: otel-workshop
+  labels:
+    app.kubernetes.io/name: pricing-py
+    app.kubernetes.io/part-of: otel-workshop
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: pricing-py
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: pricing-py
+        app.kubernetes.io/part-of: otel-workshop
+    spec:
+      containers:
+        - name: pricing-py
+          image: REGISTRY/otel-workshop/pricing-py:0.1.0
+          ports:
+            - name: http
+              containerPort: 8000
+          env:
+            - name: DB_HOST
+              value: mysql
+            - name: DB_NAME
+              value: shop
+            - name: DB_USER
+              valueFrom:
+                secretKeyRef: { name: mysql, key: user }
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: mysql, key: password }
+            # OpenTelemetry (opentelemetry-distro in the image). Python injection by the Dash0 operator is
+            # opt-in (Helm value), so don't assume it's enabled; disabling it here prevents double instrumentation if
+            # it is ever turned on.
+            - name: OTEL_INJECTOR_AUTO_INSTRUMENTATION_DISABLED
+              value: python
+            - name: OTEL_SERVICE_NAME
+              value: pricing-py
+            - name: NODE_IP
+              valueFrom:
+                fieldRef: { fieldPath: status.hostIP }
+            # 40318 is the host port of the Dash0 operator's node-local collector (container port 4318).
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: http://$(NODE_IP):40318
+            - name: OTEL_EXPORTER_OTLP_PROTOCOL
+              value: http/protobuf
+            - name: OTEL_TRACES_EXPORTER
+              value: otlp
+            - name: OTEL_METRICS_EXPORTER
+              value: otlp
+            # Logs go to stdout as JSON and are collected by the operator.
+            - name: OTEL_LOGS_EXPORTER
+              value: none
+          readinessProbe:
+            tcpSocket: { port: http }
+            periodSeconds: 5
+          resources:
+            requests: { cpu: 50m, memory: 128Mi }
+            limits: { memory: 256Mi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: pricing-py
+  namespace: otel-workshop
+  labels:
+    app.kubernetes.io/name: pricing-py
+spec:
+  selector:
+    app.kubernetes.io/name: pricing-py
+  ports:
+    - name: http
+      port: 8000
+      targetPort: http

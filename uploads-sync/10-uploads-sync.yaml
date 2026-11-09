@@ -1,0 +1,65 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: uploads-sync
+  namespace: otel-workshop
+  labels:
+    app.kubernetes.io/name: uploads-sync
+    app.kubernetes.io/part-of: otel-workshop
+spec:
+  # Nightly, like the real sync. Trigger on demand with ./trigger-incident.sh.
+  schedule: "0 2 * * *"
+  timeZone: Etc/UTC
+  # A stuck run blocks the next one, as in the incident.
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      # Give up after 30 minutes so a forgotten demo run doesn't sit in Pending forever. Must stay above
+      # the 15-minute "didn't complete" alert in alerts/, or the job is gone before the alert can fire.
+      activeDeadlineSeconds: 1800
+      ttlSecondsAfterFinished: 3600
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: uploads-sync
+            app.kubernetes.io/part-of: otel-workshop
+        spec:
+          restartPolicy: Never
+          affinity:
+            # Prefer a different node from academy-site. On a multi-node cluster with attachable RWO
+            # storage this is what turns the conflict into Multi-Attach / FailedAttachVolume. It's a
+            # preference, so on a single-node cluster the pod still targets the same node and is
+            # blocked by the ReadWriteOncePod claim instead.
+            podAntiAffinity:
+              preferredDuringSchedulingIgnoredDuringExecution:
+                - weight: 100
+                  podAffinityTerm:
+                    topologyKey: kubernetes.io/hostname
+                    labelSelector:
+                      matchLabels:
+                        app.kubernetes.io/name: academy-site
+          containers:
+            - name: sync
+              image: busybox:1.37
+              command: ["sh", "-c"]
+              args:
+                - |
+                  archive=/tmp/uploads-$(date -u +%Y%m%dT%H%M%SZ).tar.gz
+                  echo "archiving /uploads ($(ls /uploads | wc -l) files)"
+                  tar czf "$archive" -C /uploads .
+                  echo "uploading $(du -k "$archive" | cut -f1) KiB to s3://academy-uploads/ (simulated)"
+                  sleep 90
+                  echo "upload finished"
+              resources:
+                requests: { cpu: 10m, memory: 16Mi }
+                limits: { memory: 64Mi }
+              volumeMounts:
+                - name: uploads
+                  mountPath: /uploads
+          volumes:
+            - name: uploads
+              persistentVolumeClaim:
+                claimName: uploads

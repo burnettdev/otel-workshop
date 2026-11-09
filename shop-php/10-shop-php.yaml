@@ -1,0 +1,98 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: shop-php
+  namespace: otel-workshop
+  labels:
+    app.kubernetes.io/name: shop-php
+    app.kubernetes.io/part-of: otel-workshop
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: shop-php
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: shop-php
+        app.kubernetes.io/part-of: otel-workshop
+    spec:
+      containers:
+        - name: shop-php
+          image: REGISTRY/otel-workshop/shop-php:0.3.1
+          ports:
+            - name: http
+              containerPort: 80
+          envFrom:
+            - configMapRef:
+                name: shop-php-flags
+          env:
+            - name: DB_HOST
+              value: mysql
+            - name: DB_NAME
+              value: shop
+            - name: DB_USER
+              valueFrom:
+                secretKeyRef: { name: mysql, key: user }
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: mysql, key: password }
+            - name: PRICING_URL
+              value: http://pricing-py:8000
+            - name: INVENTORY_URL
+              value: http://inventory-go:8080
+            - name: RECOMMENDATIONS_URL
+              value: http://recommendations-node:3000
+            - name: PAYMENT_URL
+              value: http://payment-java:8080
+            # OpenTelemetry (extension + SDK + auto-instrumentation baked into the image;
+            # the Dash0 operator does not inject PHP).
+            - name: OTEL_PHP_AUTOLOAD_ENABLED
+              value: "true"
+            - name: OTEL_SERVICE_NAME
+              value: shop-php
+            - name: NODE_IP
+              valueFrom:
+                fieldRef: { fieldPath: status.hostIP }
+            # 40318 is the host port of the Dash0 operator's node-local collector (container port 4318).
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: http://$(NODE_IP):40318
+            - name: OTEL_EXPORTER_OTLP_PROTOCOL
+              value: http/protobuf
+            - name: OTEL_PROPAGATORS
+              value: tracecontext,baggage
+            - name: OTEL_TRACES_EXPORTER
+              value: otlp
+            - name: OTEL_METRICS_EXPORTER
+              value: none
+            # Logs go to stderr as JSON and are collected by the operator.
+            - name: OTEL_LOGS_EXPORTER
+              value: none
+          # Keep serving for a few seconds after termination starts, while the pod is removed from the
+          # Service's endpoints. Without this, restarts (e.g. slow-checkout.sh) cause connection-refused errors.
+          lifecycle:
+            preStop:
+              exec:
+                command: ["sleep", "5"]
+          # TCP probes so health checks don't create traces.
+          readinessProbe:
+            tcpSocket: { port: http }
+            periodSeconds: 5
+          resources:
+            requests: { cpu: 50m, memory: 128Mi }
+            limits: { memory: 256Mi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: shop-php
+  namespace: otel-workshop
+  labels:
+    app.kubernetes.io/name: shop-php
+spec:
+  selector:
+    app.kubernetes.io/name: shop-php
+  ports:
+    - name: http
+      port: 80
+      targetPort: http

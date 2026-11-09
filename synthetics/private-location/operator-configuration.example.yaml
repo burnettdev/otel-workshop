@@ -1,0 +1,32 @@
+# Example Dash0OperatorConfiguration with a synthetics worker (private location) for the storefront checks.
+# Not applied by `kubectl apply -f synthetics/`. See README, "Synthetic checks".
+#
+# The synthetics worker requires a manually managed operator configuration, so the operator must be installed
+# with operator.dash0Export.enabled=false, operator.syntheticsWorker.enabled=true and
+# operator.syntheticsWorker.serverAddress=<Outbound Connector endpoint>. Copy any other settings you rely on
+# from your current configuration (kubectl get dash0operatorconfiguration -o yaml) before replacing it.
+apiVersion: operator.dash0.com/v1alpha1
+kind: Dash0OperatorConfiguration
+metadata:
+  name: dash0-operator-configuration-resource
+spec:
+  exports:
+    - dash0:
+        endpoint: ingress.YOUR_REGION.aws.dash0.com:4317
+        apiEndpoint: https://api.YOUR_REGION.aws.dash0.com
+        dataset: YOUR_DATASET
+        authorization:
+          secretRef:
+            name: dash0-authorization-secret
+            key: token
+  syntheticsWorker:
+    instances:
+      # The location ID is permanent in your Dash0 organization and can't be removed or reused, so choose it
+      # deliberately: lowercase letters, digits and hyphens, at most 40 characters.
+      - locationId: YOUR_LOCATION_ID
+        # A secret in the operator's namespace (dash0-system). The operator passes it to the worker.
+        authorization:
+          secretRef:
+            name: dash0-authorization-secret
+            key: token
+        replicas: 1

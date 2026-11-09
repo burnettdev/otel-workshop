@@ -1,0 +1,40 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: loadgen
+  namespace: otel-workshop
+  labels:
+    app.kubernetes.io/name: loadgen
+    app.kubernetes.io/part-of: otel-workshop
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: loadgen
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: loadgen
+        app.kubernetes.io/part-of: otel-workshop
+    spec:
+      containers:
+        - name: loadgen
+          image: curlimages/curl:8.11.1
+          env:
+            - name: TARGET
+              value: http://shop-php
+            - name: INTERVAL_SECONDS
+              value: "3"
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              while true; do
+                for path in /products "/products/$(( RANDOM % 12 + 1 ))" /checkout /slow; do
+                  code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "$TARGET$path")
+                  echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) GET $path $code"
+                done
+                sleep "$INTERVAL_SECONDS"
+              done
+          resources:
+            requests: { cpu: 10m, memory: 16Mi }
+            limits: { memory: 32Mi }
