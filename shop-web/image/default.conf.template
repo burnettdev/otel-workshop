@@ -33,7 +33,7 @@ server {
     location = /dash0-config.js {
         default_type application/javascript;
         expires -1;
-        return 200 'window.DASH0_CONFIG = {"serviceName": "shop-web", "endpoint": {"url": "${DASH0_OTLP_ENDPOINT}", "authToken": "${DASH0_AUTH_TOKEN}", "dataset": "${DASH0_DATASET}"}};\n';
+        return 200 'window.DASH0_CONFIG = {"serviceName": "shop-web", "endpoint": {"url": "${DASH0_OTLP_ENDPOINT}", "authToken": "${DASH0_AUTH_TOKEN}", "dataset": "${DASH0_DATASET}"}, "additionalSignalAttributes": {"vcs.ref.head.revision": "${DASH0_VCS_REVISION}", "vcs.repository.url.full": "${DASH0_VCS_REPOSITORY_URL}"}};\n';
     }
 
     # Same-origin proxy to shop-php: /api/checkout -> http://shop-php/checkout. traceparent is passed through.

@@ -152,16 +152,27 @@ Then browse to <http://localhost:8081>. Use `localhost` rather than another host
 
 ### Building the images
 
-shop-php, pricing-py and shop-web are built from their `image/` folders; no prebuilt images are published. Build for your nodes' CPU architecture (`kubectl get nodes -o jsonpath='{.items[*].status.nodeInfo.architecture}'`), here `amd64`, and push to your registry:
+All six services are built from their `image/` folders; no prebuilt images are published. Build for your nodes' CPU architecture (`kubectl get nodes -o jsonpath='{.items[*].status.nodeInfo.architecture}'`), here `amd64`, and push to your registry. Build from a clean checkout, so the commit you pass in is the code in the image:
 
 ```sh
-docker buildx build --platform linux/amd64 -t REGISTRY/otel-workshop/shop-php:0.3.1 --push shop-php/image
-docker buildx build --platform linux/amd64 -t REGISTRY/otel-workshop/pricing-py:0.1.0 --push pricing-py/image
-docker buildx build --platform linux/amd64 -t REGISTRY/otel-workshop/recommendations-node:0.1.1 --push recommendations-node/image
-docker buildx build --platform linux/amd64 -t REGISTRY/otel-workshop/inventory-go:0.1.1 --push inventory-go/image
-docker buildx build --platform linux/amd64 -t REGISTRY/otel-workshop/payment-java:0.1.0 --push payment-java/image
-docker buildx build --platform linux/amd64 -t REGISTRY/otel-workshop/shop-web:0.2.1 --push shop-web/image
+REV=$(git rev-parse HEAD)
+REPO=https://github.com/your-org/otel-workshop   # your copy of this repository
+
+docker buildx build --platform linux/amd64 --build-arg VCS_REVISION=$REV --build-arg VCS_REPOSITORY_URL=$REPO -t REGISTRY/otel-workshop/shop-php:0.3.1 --push shop-php/image
+docker buildx build --platform linux/amd64 --build-arg VCS_REVISION=$REV --build-arg VCS_REPOSITORY_URL=$REPO -t REGISTRY/otel-workshop/pricing-py:0.1.0 --push pricing-py/image
+docker buildx build --platform linux/amd64 --build-arg VCS_REVISION=$REV --build-arg VCS_REPOSITORY_URL=$REPO -t REGISTRY/otel-workshop/recommendations-node:0.1.1 --push recommendations-node/image
+docker buildx build --platform linux/amd64 --build-arg VCS_REVISION=$REV --build-arg VCS_REPOSITORY_URL=$REPO -t REGISTRY/otel-workshop/inventory-go:0.1.1 --push inventory-go/image
+docker buildx build --platform linux/amd64 --build-arg VCS_REVISION=$REV --build-arg VCS_REPOSITORY_URL=$REPO -t REGISTRY/otel-workshop/payment-java:0.1.0 --push payment-java/image
+docker buildx build --platform linux/amd64 --build-arg VCS_REVISION=$REV --build-arg VCS_REPOSITORY_URL=$REPO -t REGISTRY/otel-workshop/shop-web:0.2.1 --push shop-web/image
 ```
+
+**Version-control attributes.** The two build args end up in the telemetry, so every span, log and metric says which commit and repository it came from:
+
+- The five backend images set `OTEL_RESOURCE_ATTRIBUTES=vcs.ref.head.revision=<commit>,vcs.repository.url.full=<repo>`. Every OpenTelemetry SDK reads that variable, including the Java and Node.js agents the Dash0 operator injects. The operator appends its own `k8s.*` and `service.*` attributes to the variable rather than replacing it. Don't set `OTEL_RESOURCE_ATTRIBUTES` in a manifest: a container env var replaces the image's value instead of merging with it.
+- shop-web passes the same values to the browser SDK as `additionalSignalAttributes`. In the browser they're attributes on each signal, because the Web SDK doesn't take custom resource attributes.
+- The images also get the standard `org.opencontainers.image.revision` and `org.opencontainers.image.source` labels.
+
+If you leave out the build args, the attributes say `unknown`.
 
 The Go and Java images compile on your machine's own architecture and only the final stage targets the nodes', so cross-building is quick. The PHP image compiles the `opentelemetry` extension under emulation and takes a few minutes. If you change a tag, update the `image:` field in the matching `10-*.yaml` manifest.
 

@@ -9,5 +9,11 @@ COPY --from=sdk /sdk/package/dist/dash0.iife.js /sdk/package/dist/dash0-session-
 COPY site/ /usr/share/nginx/html/
 # Rendered by the nginx image's entrypoint (envsubst) into /etc/nginx/conf.d/default.conf at start.
 COPY default.conf.template /etc/nginx/templates/default.conf.template
+# Version-control details, from build args (see README, "Building the images"). nginx passes them to the browser
+# SDK as additionalSignalAttributes via /dash0-config.js.
+ARG VCS_REVISION=unknown
+ARG VCS_REPOSITORY_URL=unknown
+LABEL org.opencontainers.image.revision=$VCS_REVISION org.opencontainers.image.source=$VCS_REPOSITORY_URL
+ENV DASH0_VCS_REVISION=$VCS_REVISION DASH0_VCS_REPOSITORY_URL=$VCS_REPOSITORY_URL
 # Only substitute our own variables, never nginx's.
 ENV NGINX_ENVSUBST_FILTER=^DASH0_
