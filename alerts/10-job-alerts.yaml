@@ -17,17 +17,18 @@ spec:
       interval: 1m
       rules:
         # k8s.pod.phase: 1 = Pending, 2 = Running, 3 = Succeeded, 4 = Failed, 5 = Unknown.
-        # Only pods owned by a Job carry a non-empty k8s_job_name.
+        # Only pods owned by a Job carry a non-empty k8s_job_name. The 1-minute grace period makes it fire live,
+        # a minute or two after ./uploads-sync/trigger-incident.sh.
         - alert: JobPodPending
           expr: |
             max by (k8s_namespace_name, k8s_job_name, k8s_pod_name) (
               {otel_metric_name="k8s.pod.phase", otel_metric_type="gauge", k8s_namespace_name="otel-workshop", k8s_job_name!=""}
             ) == 1
-          for: 10m
+          for: 1m
           labels:
             env: prod
           annotations:
-            summary: "Job pod {{ $labels.k8s_pod_name }} has been Pending for more than 10 minutes"
+            summary: "Job pod {{ $labels.k8s_pod_name }} has been Pending for more than 1 minute"
             description: >-
               Pod {{ $labels.k8s_pod_name }} of Job {{ $labels.k8s_job_name }} in {{ $labels.k8s_namespace_name }}
               can't start. Check its events: a FailedScheduling or FailedAttachVolume warning usually means another

@@ -260,7 +260,7 @@ FailedScheduling  0/1 nodes are available: 1 node(s) unavailable due to Persiste
 
 This scales `academy-site` to 0, waits for the job to finish (about 90 seconds), then scales the site back to 1. The site is down for that whole window. In Dash0 this shows as `Killing` and `ScalingReplicaSet` events for `academy-site`, followed by the job's pod being scheduled and completing.
 
-**Alerts:** with `alerts/20-job-alerts-demo.yaml` applied, the check rule `otel-workshop jobs (demo) - JobPodPending` fires one to two minutes after the trigger. That's the 1-minute grace period plus the 30-second metric collection and the 1-minute evaluation interval. The affected resource is the stuck pod. The production rules in `alerts/10-job-alerts.yaml` fire after 10 minutes (`JobPodPending`) and 15 minutes (`CronJobRunNotCompleted`). All of them resolve once `recover.sh` lets the job run.
+**Alerts:** the check rule `otel-workshop jobs - JobPodPending` fires one to two minutes after the trigger. That's the 1-minute grace period plus the 30-second metric collection and the 1-minute evaluation interval. The affected resource is the stuck pod. `otel-workshop jobs - CronJobRunNotCompleted` fires after 15 minutes. Both resolve once `recover.sh` lets the job run.
 
 If nobody runs `recover.sh`, the job gives up after 30 minutes (`activeDeadlineSeconds: 1800`). This has to stay above the 15-minute alert threshold, or the job disappears before that alert can fire. Because the CronJob has `concurrencyPolicy: Forbid`, a stuck run also blocks the next scheduled one. The schedule is `0 2 * * *` (UTC).
 
@@ -421,9 +421,8 @@ The Dash0 operator turns `PrometheusRule` resources into Dash0 check rules for e
 
 | Rule | Fires when | File |
 | --- | --- | --- |
-| `otel-workshop jobs - JobPodPending` | A pod owned by a Job in `otel-workshop` has been Pending for 10 minutes | `10-job-alerts.yaml` |
+| `otel-workshop jobs - JobPodPending` | A pod owned by a Job in `otel-workshop` has been Pending for 1 minute | `10-job-alerts.yaml` |
 | `otel-workshop jobs - CronJobRunNotCompleted` | An `uploads-sync` run still has active pods 15 minutes after it started | `10-job-alerts.yaml` |
-| `otel-workshop jobs (demo) - JobPodPending` | Same as `JobPodPending`, after 1 minute | `20-job-alerts-demo.yaml` |
 
 The queries use Dash0's metric naming: the metric is selected with `{otel_metric_name="k8s.pod.phase", otel_metric_type="gauge"}`, and dots in attribute names become underscores (`k8s.job.name` → `k8s_job_name`). `k8s.pod.phase` comes from the operator's `k8s_cluster` receiver, where `1` means Pending. Pod metrics get `k8s_job_name` from the operator's `k8s_attributes` processor, so `k8s_job_name!=""` restricts the rule to pods owned by a Job.
 
@@ -435,7 +434,7 @@ To check that the rules synced:
 kubectl get dash0monitoring -n otel-workshop dash0-monitoring-resource -o jsonpath='{.status.prometheusRuleSynchronizationResults}'
 ```
 
-Each `PrometheusRule` should show `"synchronizationStatus":"successful"` and `"invalidRulesTotal":0`. After the workshop, run `kubectl delete -f alerts/20-job-alerts-demo.yaml`; the operator then deletes that check rule from Dash0.
+Each `PrometheusRule` should show `"synchronizationStatus":"successful"` and `"invalidRulesTotal":0`.
 
 ## Teardown
 
