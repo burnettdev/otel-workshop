@@ -37,7 +37,9 @@ jobs:
         run: |
           mkdir -p /tmp/rules
           for f in alerts/*.yaml; do yq '.spec' "$f" > "/tmp/rules/$(basename "$f")"; done
-          docker run --rm -v /tmp/rules:/rules --entrypoint promtool prom/prometheus:v3.5.0 check rules /rules/*.yaml
+          # The glob is expanded here, on the runner: docker passes arguments to promtool without a shell.
+          cd /tmp/rules
+          docker run --rm -v /tmp/rules:/rules --entrypoint promtool prom/prometheus:v3.5.0 check rules $(printf '/rules/%s ' *.yaml)
 
   scripts:
     name: Scripts and Python
