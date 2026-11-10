@@ -1,4 +1,5 @@
-# Check rules for the slow-checkout (README scenario 6) and OOMKilled crash-loop (scenario 7) scenarios.
+# Check rules for the slow-checkout (README scenario 6), OOMKilled crash-loop (scenario 7) and failing-payments
+# (scenario 8) scenarios.
 # Same naming conventions as 10-job-alerts.yaml.
 apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
@@ -28,6 +29,29 @@ spec:
             description: >-
               p95 latency of {{ $labels.otel_span_name }} on {{ $labels.service_name }} is {{ $value }} s (normally
               under 0.5 s). Open a slow checkout trace and look under the shipping.quote span for slow database queries.
+
+        # dash0.spans counts spans, with the span status as otel_span_status_code. Normally no payment fails; with
+        # ./payment-java/payment-failures.sh on, about 30% do. The numerator is empty while nothing fails, so the
+        # rule has no result at all rather than a 0.
+        - alert: PaymentErrorRateHigh
+          expr: |
+            sum by (service_namespace, service_name, otel_span_name) (rate(
+              {otel_metric_name="dash0.spans", service_namespace="otel-workshop", service_name="payment-java", otel_span_kind="SERVER", otel_span_name="POST /payments", otel_span_status_code="ERROR"}[2m]
+            ))
+            /
+            sum by (service_namespace, service_name, otel_span_name) (rate(
+              {otel_metric_name="dash0.spans", service_namespace="otel-workshop", service_name="payment-java", otel_span_kind="SERVER", otel_span_name="POST /payments"}[2m]
+            ))
+            > 0.1
+          for: 1m
+          labels:
+            env: prod
+          annotations:
+            summary: "{{ $value | humanizePercentage }} of payments on {{ $labels.service_name }} are failing"
+            description: >-
+              More than 10% of {{ $labels.otel_span_name }} requests on {{ $labels.service_name }} have ended in an
+              error over the last 2 minutes (normally none). Checkouts fail with "payment failed". Open a failing
+              trace and look at the error on the payment-java span and its log.
 
         # k8s.container.status.reason is 1 for the reason a container is currently waiting or terminated with.
         # OOMKilled itself only lasts the moment between the kill and the restart, too short for the 30-second

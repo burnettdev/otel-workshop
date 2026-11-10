@@ -376,6 +376,7 @@ The script sets `PAYMENT_FAILURE_RATE` and restarts `payment-java`, which takes 
 - The error rate of `payment-java` and of `shop-php`'s checkout route rises, while the other services stay healthy. The trace shows where it started: the failing `POST /payments` span in `payment-java`, under shop-php's outgoing `POST` call.
 - `payment failed: payment provider timed out` (`ERROR`) from payment-java and `payment failed` (`ERROR`) from shop-php share one trace ID.
 - In the storefront, **Place order** shows "We couldn't place your order: payment failed, please try again" and keeps the cart. In Session Replay you can watch the shopper hit the error.
+- The check rule `otel-workshop services - PaymentErrorRateHigh` fires two to four minutes after the switch. It resolves a few minutes after you switch failures off.
 
 **Reset:**
 
@@ -442,6 +443,7 @@ The Dash0 operator turns `PrometheusRule` resources into Dash0 check rules for e
 | `otel-workshop jobs - JobPodPending` | A pod owned by a Job in `otel-workshop` has been Pending for 1 minute | `10-job-alerts.yaml` |
 | `otel-workshop jobs - CronJobRunNotCompleted` | An `uploads-sync` run still has active pods 15 minutes after it started | `10-job-alerts.yaml` |
 | `otel-workshop services - CheckoutLatencyHigh` | p95 latency of `GET /checkout` or `POST /checkout` on `shop-php` is above 1 s for 1 minute | `20-scenario-alerts.yaml` |
+| `otel-workshop services - PaymentErrorRateHigh` | More than 10% of `POST /payments` requests on `payment-java` fail over 2 minutes, for 1 minute | `20-scenario-alerts.yaml` |
 | `otel-workshop services - ContainerCrashLooping` | A container in `otel-workshop` has been in `CrashLoopBackOff` in the last 5 minutes | `20-scenario-alerts.yaml` |
 
 The queries use Dash0's metric naming: the metric is selected with `{otel_metric_name="k8s.pod.phase", otel_metric_type="gauge"}`, and dots in attribute names become underscores (`k8s.job.name` → `k8s_job_name`). `k8s.pod.phase` comes from the operator's `k8s_cluster` receiver, where `1` means Pending. Pod metrics get `k8s_job_name` from the operator's `k8s_attributes` processor, so `k8s_job_name!=""` restricts the rule to pods owned by a Job.
@@ -449,6 +451,8 @@ The queries use Dash0's metric naming: the metric is selected with `{otel_metric
 **Limits of `CronJobRunNotCompleted`.** `k8s_cluster` has no metric for a CronJob's last schedule time, so the rule measures time since the Job started. A CronJob creates its Job at the scheduled time, so for scheduled runs this is effectively the same thing. The rule uses `k8s.job.active_pods`, which counts Pending and Running pods, rather than `k8s.cronjob.active_jobs`, because the CronJob doesn't count jobs created with `kubectl create job --from=cronjob/...` as active. It matches jobs by name (`uploads-sync-.+`), and it does not detect runs that never started at all.
 
 **`CheckoutLatencyHigh`** uses `dash0.spans.duration`, the span-duration histogram Dash0 computes from ingested spans, so span attributes such as `otel_span_name` are available as labels. Normal checkout p95 is about 0.4 s. `GET /slow` is left out because it's slow on purpose.
+
+**`PaymentErrorRateHigh`** divides the `payment-java` `POST /payments` spans with status `ERROR` by all of them, using `dash0.spans`, the span count Dash0 computes from ingested spans. Normally no payments fail, so the rule has no result at all.
 
 **`ContainerCrashLooping`** uses `k8s.container.status.reason` from `k8s_cluster`. It can't alert on `OOMKilled` directly: a container only shows that reason between the kill and the restart, which is too short for the 30-second metric collection to catch reliably. The restart count (`k8s.container.restarts`) didn't work either, because it lagged the real count. The rule fires on the `CrashLoopBackOff` that follows repeated kills; the termination reason is in the container's status and its events.
 
