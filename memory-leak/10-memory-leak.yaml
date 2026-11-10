@@ -1,4 +1,5 @@
-# Optional scenario, not part of the default deployment. Switch it on and off with ./memory-leak/oom-crashloop.sh.
+# Deployed with 0 replicas, so it's off until you switch it on with ./memory-leak/oom-crashloop.sh on or the
+# scenario control panel, which scale it to 1.
 # The container allocates memory it never frees until it exceeds its 96Mi limit and is OOMKilled.
 # Kubernetes restarts it, it leaks again, and the restarts back off into CrashLoopBackOff.
 apiVersion: apps/v1
@@ -10,7 +11,7 @@ metadata:
     app.kubernetes.io/name: memory-leak
     app.kubernetes.io/part-of: otel-workshop
 spec:
-  replicas: 1
+  replicas: 0
   selector:
     matchLabels:
       app.kubernetes.io/name: memory-leak

@@ -1,0 +1,54 @@
+# Web page at /flags (through the Ingress in ingress/) that switches the scenarios on and off.
+# It has no login: anyone who can reach the Ingress can switch scenarios. See README, "Scenario control panel".
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: scenario-control
+  namespace: otel-workshop
+  labels:
+    app.kubernetes.io/name: scenario-control
+    app.kubernetes.io/part-of: otel-workshop
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: scenario-control
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: scenario-control
+        app.kubernetes.io/part-of: otel-workshop
+    spec:
+      serviceAccountName: scenario-control
+      containers:
+        - name: scenario-control
+          image: REGISTRY/otel-workshop/scenario-control:0.1.2
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            # Keep the control panel's own Kubernetes API calls out of the workshop's traces. Its JSON logs
+            # ("scenario slow-checkout: on", ...) still reach Dash0 and mark when each scenario was switched.
+            - name: OTEL_INJECTOR_AUTO_INSTRUMENTATION_DISABLED
+              value: python
+          readinessProbe:
+            httpGet: { path: /healthz, port: http }
+            periodSeconds: 5
+          resources:
+            requests: { cpu: 10m, memory: 32Mi }
+            limits: { memory: 64Mi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: scenario-control
+  namespace: otel-workshop
+  labels:
+    app.kubernetes.io/name: scenario-control
+spec:
+  selector:
+    app.kubernetes.io/name: scenario-control
+  ports:
+    - name: http
+      port: 80
+      targetPort: http

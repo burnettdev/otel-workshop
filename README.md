@@ -26,11 +26,11 @@ The manifests contain placeholders for the values that differ per environment. R
 
 | Placeholder | Where | Replace with |
 | --- | --- | --- |
-| `REGISTRY` | `image:` in `shop-php/`, `pricing-py/`, `shop-web/` | The registry you push the images to, e.g. `ghcr.io/your-org` |
+| `REGISTRY` | `image:` in the manifests of every component with an `image/` folder | The registry you push the images to, e.g. `ghcr.io/your-org` |
 | `YOUR_REGION` | `DASH0_OTLP_ENDPOINT` in `shop-web/10-shop-web.yaml` | Your Dash0 region, as shown on the Endpoints page in Dash0 settings, e.g. `eu-west-1` |
 | `YOUR_DATASET` | `DASH0_DATASET` in `shop-web/10-shop-web.yaml` | The dataset in your operator's export: `kubectl get dash0operatorconfiguration -o jsonpath='{.items[0].spec.exports[0].dash0.dataset}'` |
 | `REPLACE_WITH_INGEST_ONLY_TOKEN` | `shop-web/00-dash0-web-secret.yaml` | An ingest-only Dash0 auth token (see "shop-web"; better created with `kubectl create secret` than written into the file) |
-| `shop.example.com` | `shop-web/optional/ingress.yaml` | Only if you use the optional Ingress |
+| `shop.example.com` | `ingress/10-ingress.yaml` | The hostname for the storefront and the scenario control panel |
 
 For example:
 
@@ -54,7 +54,9 @@ grep -rlE 'REGISTRY/|YOUR_REGION|YOUR_DATASET' --include='*.yaml' . | xargs sed 
 | [`academy-site/`](academy-site/) | nginx site, 1 replica, mounting the exclusive `uploads` PVC |
 | [`uploads-sync/`](uploads-sync/) | CronJob that needs the same PVC, plus `trigger-incident.sh` and `recover.sh` |
 | [`shop-web/`](shop-web/) | Storefront (nginx) with the Dash0 Web SDK and Session Replay, proxying `/api` to shop-php |
-| [`memory-leak/`](memory-leak/) | Optional: a Deployment that leaks memory until it's OOMKilled. Not deployed by default |
+| [`memory-leak/`](memory-leak/) | A Deployment that leaks memory until it's OOMKilled. Deployed with 0 replicas, so it only runs while the scenario is on |
+| [`scenario-control/`](scenario-control/) | Web page at `/flags` that switches the scenarios on and off |
+| [`ingress/`](ingress/) | Ingress for the storefront (`/`) and the scenario control panel (`/flags`) |
 | [`alerts/`](alerts/) | `PrometheusRule` resources that the operator syncs into Dash0 check rules |
 | [`synthetics/`](synthetics/) | Optional: Dash0 synthetic checks against the storefront, run from a private location in the cluster |
 
@@ -70,8 +72,9 @@ kubectl wait -n otel-workshop deploy/mysql --for=condition=Available --timeout=1
 kubectl apply -f pricing-py/ -f recommendations-node/ -f inventory-go/ -f payment-java/ -f shop-php/
 kubectl apply -f loadgen/
 kubectl apply -f shop-web/        # set the Dash0 auth token first, see "shop-web" below
-kubectl apply -f academy-site/ -f uploads-sync/
+kubectl apply -f academy-site/ -f uploads-sync/ -f memory-leak/
 kubectl apply -f alerts/
+kubectl apply -f scenario-control/ -f ingress/   # set your hostname in ingress/ first
 ```
 
 Apply the namespace before the monitoring resource. If you apply the whole `base/` folder in one command on a fresh cluster, the monitoring resource can fail with `namespaces "otel-workshop" not found`. Running the command again fixes it.
@@ -146,15 +149,19 @@ The ingest endpoint is the `DASH0_OTLP_ENDPOINT` env var in `shop-web/10-shop-we
 
 **Open it:**
 
+With the Ingress applied, browse to `https://shop.example.com/` (your hostname). It needs a DNS record for the host pointing at the ingress controller, and a certificate for it: `ingress/10-ingress.yaml` uses Traefik's default certificate, so add a TLS secret if that doesn't cover your host.
+
+Without the Ingress, port-forward:
+
 ```sh
 kubectl port-forward -n otel-workshop svc/shop-web 8081:80
 ```
 
-Then browse to <http://localhost:8081>. Use `localhost` rather than another hostname: browsers treat `http://localhost` as a secure context but not other plain-HTTP hosts. `shop-web/optional/ingress.yaml` exposes the page through Traefik instead. It isn't applied by default, because it needs DNS and a TLS secret in `otel-workshop`; the file explains what to set up.
+Then browse to <http://localhost:8081>. Use `localhost` rather than another hostname: browsers treat `http://localhost` as a secure context but not other plain-HTTP hosts.
 
 ### Building the images
 
-All six services are built from their `image/` folders; no prebuilt images are published. Build for your nodes' CPU architecture (`kubectl get nodes -o jsonpath='{.items[*].status.nodeInfo.architecture}'`), here `amd64`, and push to your registry. Build from a clean checkout, so the commit you pass in is the code in the image:
+The six services and the scenario control panel are built from their `image/` folders; no prebuilt images are published. Build for your nodes' CPU architecture (`kubectl get nodes -o jsonpath='{.items[*].status.nodeInfo.architecture}'`), here `amd64`, and push to your registry. Build from a clean checkout, so the commit you pass in is the code in the image:
 
 ```sh
 REV=$(git rev-parse HEAD)
@@ -166,6 +173,7 @@ docker buildx build --platform linux/amd64 --build-arg VCS_REVISION=$REV --build
 docker buildx build --platform linux/amd64 --build-arg VCS_REVISION=$REV --build-arg VCS_REPOSITORY_URL=$REPO -t REGISTRY/otel-workshop/inventory-go:0.1.3 --push inventory-go/image
 docker buildx build --platform linux/amd64 --build-arg VCS_REVISION=$REV --build-arg VCS_REPOSITORY_URL=$REPO -t REGISTRY/otel-workshop/payment-java:0.1.1 --push payment-java/image
 docker buildx build --platform linux/amd64 --build-arg VCS_REVISION=$REV --build-arg VCS_REPOSITORY_URL=$REPO -t REGISTRY/otel-workshop/shop-web:0.2.2 --push shop-web/image
+docker buildx build --platform linux/amd64 --build-arg VCS_REVISION=$REV --build-arg VCS_REPOSITORY_URL=$REPO -t REGISTRY/otel-workshop/scenario-control:0.1.2 --push scenario-control/image
 ```
 
 **Version-control attributes.** The two build args end up in the telemetry, so every span, log and metric says which commit and repository it came from:
@@ -188,6 +196,14 @@ kubectl port-forward -n otel-workshop svc/shop-php 8080:80
 ```
 
 The load generator keeps traffic flowing in the background. To pause it, run `kubectl scale -n otel-workshop deploy/loadgen --replicas=0`; to resume, set it back to `1`.
+
+### Scenario control panel
+
+`https://shop.example.com/flags` (your hostname) has an on/off switch for each scenario that needs one: slow checkout, failing payments, the OOMKilled crash loop, and the stuck sync job (trigger and recover). It does the same as the scripts below, and you can mix the two: the page shows the current state, whichever way it was changed. It refreshes every 5 seconds. Switching slow checkout or failing payments restarts the service, so the page shows "restarting" for a few seconds.
+
+Each switch writes a log line such as `scenario slow-checkout: on` from `scenario-control`, so in Dash0 you can see exactly when each scenario started.
+
+The panel's `ServiceAccount` can only change the objects the scenarios use, all in `otel-workshop` (see `scenario-control/00-rbac.yaml`). **The page has no login:** anyone who can reach the Ingress can switch scenarios. Only expose it on a network you trust, or put authentication in front of it (for example a Traefik `basicAuth` or `forwardAuth` middleware).
 
 ### 1. One checkout trace across four languages
 
@@ -341,7 +357,7 @@ kubectl get pods -n otel-workshop -l app.kubernetes.io/name=memory-leak -w
 ./memory-leak/oom-crashloop.sh off
 ```
 
-This deletes the Deployment. The scenario is not part of "Deploy everything", so it only runs while you have it switched on.
+This scales `memory-leak` back to 0 replicas. Re-applying `memory-leak/` also switches it off.
 
 ### 8. Failing payments (optional)
 
@@ -447,10 +463,11 @@ Each `PrometheusRule` should show `"synchronizationStatus":"successful"` and `"i
 ## Teardown
 
 ```sh
+kubectl delete -f ingress/ -f scenario-control/ --ignore-not-found
 kubectl delete -f alerts/
 kubectl delete -f synthetics/ --ignore-not-found
 kubectl delete -f memory-leak/ --ignore-not-found
-kubectl delete -f shop-web/ -f shop-web/optional/ --ignore-not-found
+kubectl delete -f shop-web/
 kubectl delete -f uploads-sync/ -f academy-site/
 kubectl delete -f loadgen/ -f shop-php/ -f payment-java/ -f inventory-go/ -f recommendations-node/ -f pricing-py/ -f mysql/
 kubectl delete -f base/10-dash0-monitoring.yaml   # lets the operator remove instrumentation cleanly
