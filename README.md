@@ -307,6 +307,7 @@ The script sets `CHECKOUT_SLOW_QUERY: "true"` in the `shop-php-flags` ConfigMap 
 - In a checkout trace, under `shipping.quote`, there's a `PDO::query` span of about 2 s with `db.query.text = SELECT SLEEP(2) AS slept`, after the calls to `pricing-py`.
 - Each slow checkout logs `checkout ran slow query` at `WARNING`, linked to its trace.
 - The restart itself shows up as `Killing` and `Scheduled` events for `shop-php` around the time latency changes.
+- The check rule `otel-workshop services - CheckoutLatencyHigh` fires two to four minutes after the switch. It resolves a few minutes after you switch the flag off.
 
 **Reset:**
 
@@ -332,6 +333,7 @@ kubectl get pods -n otel-workshop -l app.kubernetes.io/name=memory-leak -w
 - The container restart count goes up, and the container's last termination reason is `OOMKilled`.
 - `BackOff` warning events (`Back-off restarting failed container leaker ...`) appear in the logs as Kubernetes events.
 - The container's own logs show `leaked_mib` rising to about 86 before each kill.
+- The check rule `otel-workshop services - ContainerCrashLooping` fires a few minutes after the trigger, once Kubernetes starts backing off the restarts. It resolves about 5 minutes after you switch the scenario off.
 
 **Reset:**
 
@@ -423,10 +425,16 @@ The Dash0 operator turns `PrometheusRule` resources into Dash0 check rules for e
 | --- | --- | --- |
 | `otel-workshop jobs - JobPodPending` | A pod owned by a Job in `otel-workshop` has been Pending for 1 minute | `10-job-alerts.yaml` |
 | `otel-workshop jobs - CronJobRunNotCompleted` | An `uploads-sync` run still has active pods 15 minutes after it started | `10-job-alerts.yaml` |
+| `otel-workshop services - CheckoutLatencyHigh` | p95 latency of `GET /checkout` or `POST /checkout` on `shop-php` is above 1 s for 1 minute | `20-scenario-alerts.yaml` |
+| `otel-workshop services - ContainerCrashLooping` | A container in `otel-workshop` has been in `CrashLoopBackOff` in the last 5 minutes | `20-scenario-alerts.yaml` |
 
 The queries use Dash0's metric naming: the metric is selected with `{otel_metric_name="k8s.pod.phase", otel_metric_type="gauge"}`, and dots in attribute names become underscores (`k8s.job.name` → `k8s_job_name`). `k8s.pod.phase` comes from the operator's `k8s_cluster` receiver, where `1` means Pending. Pod metrics get `k8s_job_name` from the operator's `k8s_attributes` processor, so `k8s_job_name!=""` restricts the rule to pods owned by a Job.
 
 **Limits of `CronJobRunNotCompleted`.** `k8s_cluster` has no metric for a CronJob's last schedule time, so the rule measures time since the Job started. A CronJob creates its Job at the scheduled time, so for scheduled runs this is effectively the same thing. The rule uses `k8s.job.active_pods`, which counts Pending and Running pods, rather than `k8s.cronjob.active_jobs`, because the CronJob doesn't count jobs created with `kubectl create job --from=cronjob/...` as active. It matches jobs by name (`uploads-sync-.+`), and it does not detect runs that never started at all.
+
+**`CheckoutLatencyHigh`** uses `dash0.spans.duration`, the span-duration histogram Dash0 computes from ingested spans, so span attributes such as `otel_span_name` are available as labels. Normal checkout p95 is about 0.4 s. `GET /slow` is left out because it's slow on purpose.
+
+**`ContainerCrashLooping`** uses `k8s.container.status.reason` from `k8s_cluster`. It can't alert on `OOMKilled` directly: a container only shows that reason between the kill and the restart, which is too short for the 30-second metric collection to catch reliably. The restart count (`k8s.container.restarts`) didn't work either, because it lagged the real count. The rule fires on the `CrashLoopBackOff` that follows repeated kills; the termination reason is in the container's status and its events.
 
 To check that the rules synced:
 
