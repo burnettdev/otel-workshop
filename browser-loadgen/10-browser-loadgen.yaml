@@ -24,7 +24,7 @@ spec:
     spec:
       containers:
         - name: browser-loadgen
-          image: REGISTRY/otel-workshop/browser-loadgen:0.1.1
+          image: REGISTRY/otel-workshop/browser-loadgen:0.1.2
           env:
             - name: TARGET_URL
               value: http://shop-web.otel-workshop.svc.cluster.local

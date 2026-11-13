@@ -196,7 +196,7 @@ docker buildx build --platform linux/amd64 --build-arg VCS_REVISION=$REV --build
 docker buildx build --platform linux/amd64 --build-arg VCS_REVISION=$REV --build-arg VCS_REPOSITORY_URL=$REPO -t REGISTRY/otel-workshop/payment-java:0.1.1 --push payment-java/image
 docker buildx build --platform linux/amd64 --build-arg VCS_REVISION=$REV --build-arg VCS_REPOSITORY_URL=$REPO -t REGISTRY/otel-workshop/shop-web:0.3.0 --push shop-web/image
 docker buildx build --platform linux/amd64 --build-arg VCS_REVISION=$REV --build-arg VCS_REPOSITORY_URL=$REPO -t REGISTRY/otel-workshop/scenario-control:0.2.0 --push scenario-control/image
-docker buildx build --platform linux/amd64 --build-arg VCS_REVISION=$REV --build-arg VCS_REPOSITORY_URL=$REPO -t REGISTRY/otel-workshop/browser-loadgen:0.1.1 --push browser-loadgen/image
+docker buildx build --platform linux/amd64 --build-arg VCS_REVISION=$REV --build-arg VCS_REPOSITORY_URL=$REPO -t REGISTRY/otel-workshop/browser-loadgen:0.1.2 --push browser-loadgen/image
 ```
 
 **Version-control attributes.** The two build args end up in the telemetry, so every span, log and metric says which commit and repository it came from:

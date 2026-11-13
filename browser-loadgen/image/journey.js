@@ -105,8 +105,13 @@ async function session(browser) {
     outcome = "error";
     log("ERROR", "session failed", { "user.email": email, error: e.message.split("\n")[0] });
   } finally {
-    // Let the SDK finish sending: Session Replay chunks are too big for keepalive requests, so leaving the page
-    // while one is in flight cancels it. Leaving then makes the SDK send its last small batch, with keepalive.
+    // Let the SDK finish sending before leaving: Session Replay chunks are too big for keepalive requests, so
+    // leaving the page while one is in flight cancels it. Hiding the page first, as if the shopper switched tabs,
+    // makes the SDK flush everything, the last replay chunk included, as ordinary requests.
+    await page.evaluate(() => {
+      Object.defineProperty(document, "visibilityState", { value: "hidden", configurable: true });
+      document.dispatchEvent(new Event("visibilitychange"));
+    }).catch(() => {});
     await telemetrySent();
     await page.goto("about:blank").catch(() => {});
     await sleep(2000);
