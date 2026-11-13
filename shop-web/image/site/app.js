@@ -33,6 +33,38 @@ function addToCart(product, qty) {
   writeCart(cart);
 }
 
+// ---- signed-in user (localStorage) ----
+const USER_KEY = "maker-supply-user";
+function readUser() {
+  try {
+    return JSON.parse(localStorage.getItem(USER_KEY));
+  } catch {
+    return null;
+  }
+}
+// identify tags every signal from now on (page views, request spans, errors, events) with user.id,
+// user.full_name and user.email, so Dash0 can filter and compare sessions per user. Without an id it removes the
+// tags again. It has to run on every page load, because the SDK doesn't remember it.
+function identify(user) {
+  if (user) dash0("identify", String(user.id), { fullName: user.name, email: user.email });
+  else dash0("identify");
+}
+function setUser(user) {
+  try {
+    if (user) localStorage.setItem(USER_KEY, JSON.stringify(user));
+    else localStorage.removeItem(USER_KEY);
+  } catch {
+    /* signed in for this page only */
+  }
+  identify(user);
+  updateAccount(user);
+}
+function updateAccount(user = readUser()) {
+  const account = document.getElementById("account");
+  account.textContent = user ? `${user.name.split(" ")[0]} · Sign out` : "Sign in";
+  account.setAttribute("href", user ? "/logout" : "/login");
+}
+
 // ---- helpers ----
 function h(tag, attrs = {}, ...children) {
   const el = document.createElement(tag);
@@ -250,6 +282,64 @@ function order(id) {
   );
 }
 
+// Each attempt sends a user.login event with the time from clicking "Sign in" to being signed in, as the shopper
+// experienced it, so Dash0 can chart login time across all sessions (scenario 9).
+function login() {
+  const message = h("div");
+  const submit = h("button", { type: "submit" }, "Sign in");
+  const field = (label, attrs) => h("label", {}, label, h("input", { required: true, ...attrs }));
+  const form = h("form", {
+    class: "login-form",
+    onsubmit: async (event) => {
+      event.preventDefault();
+      submit.disabled = true;
+      submit.textContent = "Signing in…";
+      message.replaceChildren();
+      const data = new FormData(form);
+      const started = performance.now();
+      try {
+        const { user } = await api("/login", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email: data.get("email"), password: data.get("password") }),
+        });
+        setUser(user);
+        dash0("sendEvent", "user.login", {
+          title: "Shopper signed in",
+          attributes: { "login.outcome": "success", "login.duration_ms": Math.round(performance.now() - started) },
+        });
+        navigate("/");
+      } catch (e) {
+        dash0("sendEvent", "user.login", {
+          title: "Sign-in failed",
+          severity: "WARN",
+          attributes: { "login.outcome": e.status === 401 ? "rejected" : "error", "login.duration_ms": Math.round(performance.now() - started) },
+        });
+        message.replaceChildren(errorBox(e.status === 401 ? e.message : `We couldn't sign you in: ${e.message}`));
+        submit.disabled = false;
+        submit.textContent = "Sign in";
+      }
+    },
+  },
+    field("Email", { name: "email", type: "email", autocomplete: "username" }),
+    field("Password", { name: "password", type: "password", autocomplete: "current-password" }),
+    message,
+    submit,
+  );
+  render(
+    "Sign in",
+    h("section", { class: "login" },
+      h("h1", {}, "Sign in"),
+      h("p", { class: "muted" }, "Demo accounts such as ada@example.com use the password maker-supply-demo."),
+      form),
+  );
+}
+
+function logout() {
+  setUser(null);
+  navigate("/", true);
+}
+
 // Workshop controls, kept off the shopping pages.
 function lab() {
   const output = h("pre", { class: "output" }, "Nothing yet.");
@@ -288,6 +378,8 @@ const routes = [
   [/^\/cart$/, cart],
   [/^\/checkout$/, checkout],
   [/^\/order\/([\w-]+)$/, order],
+  [/^\/login$/, login],
+  [/^\/logout$/, logout],
   [/^\/lab$/, lab],
 ];
 
@@ -312,5 +404,7 @@ document.addEventListener("click", (event) => {
 });
 window.addEventListener("popstate", route);
 
+identify(readUser());
+updateAccount();
 updateCartCount();
 route();

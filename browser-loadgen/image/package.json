@@ -1,0 +1,9 @@
+{
+  "name": "browser-loadgen",
+  "private": true,
+  "description": "Real browser sessions against the storefront, so Dash0 has many shopper sessions to compare",
+  "main": "journey.js",
+  "dependencies": {
+    "playwright": "1.55.0"
+  }
+}

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use GuzzleHttp\Client;
 use OpenTelemetry\API\Globals;
+use OpenTelemetry\API\Trace\Span;
 use OpenTelemetry\API\Trace\StatusCode;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
@@ -174,6 +175,29 @@ $app->post('/checkout', function (Request $request, Response $response) {
         return json($response, ['error' => 'cart is empty'], 400);
     }
     return checkout($response, $items);
+});
+
+// Storefront login: {"email": "...", "password": "..."}. With LOGIN_SLOW_QUERY=true the user lookup waits 1.5 s in
+// MySQL (scenario 9). The SLEEP sits in the WHERE clause, so it runs once, for the matching row only.
+$app->post('/login', function (Request $request, Response $response) {
+    $body = (array) $request->getParsedBody();
+    $email = strtolower(trim((string) ($body['email'] ?? '')));
+    $sql = 'SELECT id, email, name, password_hash FROM users WHERE email = ?';
+    if (getenv('LOGIN_SLOW_QUERY') === 'true') {
+        $sql .= ' AND SLEEP(1.5) = 0';
+    }
+    $db = db();
+    $statement = $db->prepare($sql);
+    $statement->execute([$email]);
+    $user = $statement->fetch(PDO::FETCH_ASSOC);
+    if ($user === false || !password_verify((string) ($body['password'] ?? ''), $user['password_hash'])) {
+        Log::warning('login failed', ['login.reason' => $user === false ? 'unknown email' : 'wrong password']);
+        return json($response, ['error' => 'Wrong email or password'], 401);
+    }
+    $db->prepare('UPDATE users SET last_login_at = NOW() WHERE id = ?')->execute([$user['id']]);
+    Span::getCurrent()->setAttribute('user.id', (string) $user['id']);
+    Log::info('user logged in', ['user.id' => (string) $user['id']]);
+    return json($response, ['user' => ['id' => (int) $user['id'], 'email' => $user['email'], 'name' => $user['name']]]);
 });
 
 $app->get('/slow', function (Request $request, Response $response) {

@@ -22,10 +22,10 @@ rules:
     resources: [configmaps]
     resourceNames: [shop-php-flags, payment-java-flags]
     verbs: [get, patch]
-  # Restart the services that read the flags, scale memory-leak and academy-site.
+  # Restart the services that read the flags, change pricing-py's CPU limit, scale memory-leak and academy-site.
   - apiGroups: [apps]
     resources: [deployments]
-    resourceNames: [shop-php, payment-java, memory-leak, academy-site]
+    resourceNames: [shop-php, payment-java, pricing-py, memory-leak, academy-site]
     verbs: [get, patch]
   # Stuck sync job: start a run from the CronJob, find it, and wait for it to finish.
   - apiGroups: [batch]

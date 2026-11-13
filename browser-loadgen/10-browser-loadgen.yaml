@@ -1,0 +1,47 @@
+# Headless Chromium running real shopper sessions against shop-web (see README, "browser-loadgen").
+# The Dash0 Web SDK in the page sends each session to Dash0 directly, like a real visitor's browser.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: browser-loadgen
+  namespace: otel-workshop
+  labels:
+    app.kubernetes.io/name: browser-loadgen
+    app.kubernetes.io/part-of: otel-workshop
+    # Don't let the operator inject its Node.js agent: the driver's own calls would only add noise to the traces.
+    dash0.com/enable: "false"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: browser-loadgen
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: browser-loadgen
+        app.kubernetes.io/part-of: otel-workshop
+        dash0.com/enable: "false"
+    spec:
+      containers:
+        - name: browser-loadgen
+          image: REGISTRY/otel-workshop/browser-loadgen:0.1.0
+          env:
+            - name: TARGET_URL
+              value: http://shop-web.otel-workshop.svc.cluster.local
+            # Sessions running at the same time, and the pause between one session and the next.
+            - name: CONCURRENCY
+              value: "2"
+            - name: PAUSE_SECONDS
+              value: "5"
+          resources:
+            requests: { cpu: 200m, memory: 512Mi }
+            limits: { memory: 1536Mi }
+          volumeMounts:
+            # Chromium keeps shared memory in /dev/shm, which is only 64Mi by default.
+            - name: shm
+              mountPath: /dev/shm
+      volumes:
+        - name: shm
+          emptyDir:
+            medium: Memory
+            sizeLimit: 256Mi

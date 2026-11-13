@@ -8,3 +8,5 @@ metadata:
 data:
   # "true" makes every /checkout run the slow SQL query (SELECT SLEEP(2)) inside the shipping.quote span.
   CHECKOUT_SLOW_QUERY: "false"
+  # "true" makes the POST /login user lookup wait 1.5 s in MySQL (scenario 9).
+  LOGIN_SLOW_QUERY: "false"

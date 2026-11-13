@@ -26,3 +26,35 @@ data:
       (10, 'Hotend silicone sock (3 pcs)',         699,   15, 500),
       (11, 'Print fan',                           1299,   60, 150),
       (12, 'Build plate cleaning kit',             999,  250, 110);
+  # Shopper accounts for the login (scenario 9). Every account has the password "maker-supply-demo"; the hash is
+  # bcrypt (PHP password_hash). browser-loadgen logs in as these users, so keep the two lists in step.
+  02-users.sql: |
+    CREATE TABLE users (
+      id            INT PRIMARY KEY,
+      email         VARCHAR(100) NOT NULL UNIQUE,
+      name          VARCHAR(100) NOT NULL,
+      password_hash VARCHAR(100) NOT NULL,
+      last_login_at DATETIME NULL
+    );
+    SET @hash = '$2y$10$RL2.RBvr8wAlYEV724mfr.SfoTar9exvrpLRvbg5iyeRBlmikBN7a';
+    INSERT INTO users (id, email, name, password_hash) VALUES
+      (1,  'ada@example.com',     'Ada Okafor',      @hash),
+      (2,  'bruno@example.com',   'Bruno Lindqvist', @hash),
+      (3,  'chiara@example.com',  'Chiara Russo',    @hash),
+      (4,  'dev@example.com',     'Dev Patel',       @hash),
+      (5,  'elif@example.com',    'Elif Demir',      @hash),
+      (6,  'finn@example.com',    'Finn Murphy',     @hash),
+      (7,  'grace@example.com',   'Grace Mensah',    @hash),
+      (8,  'hana@example.com',    'Hana Sato',       @hash),
+      (9,  'ivan@example.com',    'Ivan Kowalski',   @hash),
+      (10, 'jules@example.com',   'Jules Moreau',    @hash),
+      (11, 'kemal@example.com',   'Kemal Aydin',     @hash),
+      (12, 'lena@example.com',    'Lena Fischer',    @hash),
+      (13, 'mateo@example.com',   'Mateo Garcia',    @hash),
+      (14, 'nadia@example.com',   'Nadia Haddad',    @hash),
+      (15, 'oskar@example.com',   'Oskar Nilsen',    @hash),
+      (16, 'priya@example.com',   'Priya Raman',     @hash),
+      (17, 'quinn@example.com',   'Quinn Byrne',     @hash),
+      (18, 'rosa@example.com',    'Rosa Almeida',    @hash),
+      (19, 'sami@example.com',    'Sami Virtanen',   @hash),
+      (20, 'tomas@example.com',   'Tomas Novak',     @hash);

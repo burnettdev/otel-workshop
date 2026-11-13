@@ -1,7 +1,7 @@
 """scenario-control: a web page that switches the workshop scenarios on and off.
 
-It does what the scripts in each scenario's folder do (slow-checkout.sh, payment-failures.sh, oom-crashloop.sh,
-trigger-incident.sh, recover.sh), through the Kubernetes API with the pod's service account. Standard library
+It does what the scripts in each scenario's folder do (slow-checkout.sh, slow-login.sh, cpu-starvation.sh,
+payment-failures.sh, oom-crashloop.sh, trigger-incident.sh, recover.sh), through the Kubernetes API with the pod's service account. Standard library
 only. Served under /flags, the path the Ingress routes here.
 """
 
@@ -23,6 +23,7 @@ NS = open(f"{SA_DIR}/namespace").read().strip()
 SSL_CONTEXT = ssl.create_default_context(cafile=f"{SA_DIR}/ca.crt")
 BASE = "/flags"
 PAYMENT_FAILURE_RATE_ON = "0.3"
+PRICING_CPU_LIMIT_ON = "50m"
 
 
 def log(level, message, **attrs):
@@ -45,6 +46,10 @@ def merge_patch(path, body):
     return k8s("PATCH", path, body, "application/merge-patch+json")
 
 
+def strategic_patch(path, body):
+    return k8s("PATCH", path, body, "application/strategic-merge-patch+json")
+
+
 def deployment_path(name):
     return f"/apis/apps/v1/namespaces/{NS}/deployments/{name}"
 
@@ -60,6 +65,17 @@ def set_flag_and_restart(configmap, key, value, deployment):
     restarted_at = datetime.now(timezone.utc).isoformat()
     merge_patch(deployment_path(deployment), {"spec": {"template": {"metadata": {"annotations": {
         "kubectl.kubernetes.io/restartedAt": restarted_at}}}}})
+
+
+def set_cpu_limit(deployment, cpu):
+    """Like cpu-starvation.sh: changes only this container's CPU limit (None removes it), which rolls out a new pod."""
+    strategic_patch(deployment_path(deployment), {"spec": {"template": {"spec": {"containers": [
+        {"name": deployment, "resources": {"limits": {"cpu": cpu}}}]}}}})
+
+
+def cpu_limit(deployment):
+    container = k8s("GET", deployment_path(deployment))["spec"]["template"]["spec"]["containers"][0]
+    return container.get("resources", {}).get("limits", {}).get("cpu", "")
 
 
 def scale(deployment, replicas):
@@ -134,6 +150,8 @@ def recover_sync_job(job):
 def scenarios():
     """Current state of each scenario, as (id, title, description, state, is_on, actions)."""
     slow = configmap_value("shop-php-flags", "CHECKOUT_SLOW_QUERY") == "true"
+    slow_login = configmap_value("shop-php-flags", "LOGIN_SLOW_QUERY") == "true"
+    starved = cpu_limit("pricing-py") != ""
     rate = configmap_value("payment-java-flags", "PAYMENT_FAILURE_RATE") or "0"
     leak = k8s("GET", deployment_path("memory-leak"))["spec"]["replicas"] > 0
     stuck = pending_sync_jobs()
@@ -151,6 +169,14 @@ def scenarios():
         ("slow-checkout", "Slow checkout",
          "Every checkout runs a 2-second SQL query inside shipping.quote. Alert: CheckoutLatencyHigh.",
          ("On" if slow else "Off") + restarting("shop-php"), slow, [("off", "Turn off")] if slow else [("on", "Turn on")]),
+        ("slow-login", "Slow login",
+         "Every sign-in runs a user lookup that takes 1.5 s in MySQL. Compare login time across sessions in Dash0.",
+         ("On" if slow_login else "Off") + restarting("shop-php"), slow_login,
+         [("off", "Turn off")] if slow_login else [("on", "Turn on")]),
+        ("cpu-starvation", "CPU starvation",
+         f"pricing-py is held to a {PRICING_CPU_LIMIT_ON} CPU limit and throttled, so checkout slows down for shoppers.",
+         (f"On ({cpu_limit('pricing-py')} limit)" if starved else "Off") + restarting("pricing-py"), starved,
+         [("off", "Turn off")] if starved else [("on", "Turn on")]),
         ("payment-failures", "Failing payments",
          f"payment-java fails {float(PAYMENT_FAILURE_RATE_ON):.0%} of payments with HTTP 502.",
          (f"On ({float(rate):.0%})" if float(rate) > 0 else "Off") + restarting("payment-java"), float(rate) > 0,
@@ -168,6 +194,10 @@ def scenarios():
 def act(scenario, action):
     if scenario == "slow-checkout" and action in ("on", "off"):
         set_flag_and_restart("shop-php-flags", "CHECKOUT_SLOW_QUERY", "true" if action == "on" else "false", "shop-php")
+    elif scenario == "slow-login" and action in ("on", "off"):
+        set_flag_and_restart("shop-php-flags", "LOGIN_SLOW_QUERY", "true" if action == "on" else "false", "shop-php")
+    elif scenario == "cpu-starvation" and action in ("on", "off"):
+        set_cpu_limit("pricing-py", PRICING_CPU_LIMIT_ON if action == "on" else None)
     elif scenario == "payment-failures" and action in ("on", "off"):
         set_flag_and_restart("payment-java-flags", "PAYMENT_FAILURE_RATE",
                              PAYMENT_FAILURE_RATE_ON if action == "on" else "0", "payment-java")

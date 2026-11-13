@@ -22,7 +22,7 @@ spec:
       serviceAccountName: scenario-control
       containers:
         - name: scenario-control
-          image: REGISTRY/otel-workshop/scenario-control:0.1.2
+          image: REGISTRY/otel-workshop/scenario-control:0.2.0
           ports:
             - name: http
               containerPort: 8080
