@@ -39,8 +39,8 @@ log = logging.getLogger("pricing")
 app = FastAPI(title="pricing-py")
 tracer = trace.get_tracer("pricing-py")
 
-# CPU work per price, in its own span. It stands in for a pricing-rules engine: about 15 ms of one core, which is
-# nothing until the pod is held to a tight CPU limit (scenario 10, ./cpu-starvation.sh).
+# CPU work per price, in its own span. It stands in for a pricing-rules engine: about 25 ms of one core on the
+# reference node, which is nothing until the pod is held to a tight CPU limit (scenario 10, ./cpu-starvation.sh).
 RULES_ITERATIONS = int(os.environ.get("PRICING_RULES_ITERATIONS", "150000"))
 
 

@@ -31,10 +31,25 @@ async function signIn(page, email, password) {
   await page.click("form.login-form button[type=submit]");
 }
 
+// Counts the page's requests to the Dash0 endpoint that haven't finished, so the session can wait for them.
+function trackTelemetry(page) {
+  let inFlight = 0;
+  const isTelemetry = (request) => !request.url().startsWith(TARGET);
+  page.on("request", (r) => isTelemetry(r) && inFlight++);
+  page.on("requestfinished", (r) => isTelemetry(r) && inFlight--);
+  page.on("requestfailed", (r) => isTelemetry(r) && inFlight--);
+  // The SDK batches for a second before sending; then wait for what it sent, up to 15 s.
+  return async () => {
+    await sleep(1500);
+    for (let waited = 0; inFlight > 0 && waited < 15000; waited += 250) await sleep(250);
+  };
+}
+
 async function session(browser) {
   const email = pick(USERS);
   const context = await browser.newContext({ ...pick(PROFILES) });
   const page = await context.newPage();
+  const telemetrySent = trackTelemetry(page);
   page.on("console", (m) => m.type() === "warning" && log("WARNING", "browser console", { "user.email": email, text: m.text() }));
   const started = Date.now();
   let outcome = "browsed";
@@ -90,7 +105,9 @@ async function session(browser) {
     outcome = "error";
     log("ERROR", "session failed", { "user.email": email, error: e.message.split("\n")[0] });
   } finally {
-    // Leaving the page makes the SDK send what it has batched before the context goes away.
+    // Let the SDK finish sending: Session Replay chunks are too big for keepalive requests, so leaving the page
+    // while one is in flight cancels it. Leaving then makes the SDK send its last small batch, with keepalive.
+    await telemetrySent();
     await page.goto("about:blank").catch(() => {});
     await sleep(2000);
     await context.close();
