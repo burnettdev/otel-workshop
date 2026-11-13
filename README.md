@@ -414,7 +414,7 @@ This covers two questions: how long does signing in take for all users over a ti
 **Baseline:** with `browser-loadgen` running, every session signs in. Nothing to trigger.
 
 **What to show in Dash0:**
-- **Across sessions:** in the logs, filter on `event.name = user.login` from service `shop-web` and chart `login.duration_ms` (p50 and p95) over time. Group by `login.outcome` to separate successful sign-ins from mistyped passwords, or by `user.email` to compare shoppers. Normal p95 is a few hundred milliseconds.
+- **Across sessions:** in the logs, filter on `event.name = user.login` from service `shop-web` and chart `login.duration_ms` (p50 and p95) over time. Group by `login.outcome` to separate successful sign-ins from mistyped passwords, or by `user.email` to compare shoppers. From `browser-loadgen`, which runs next to the shop, a sign-in normally takes well under 100 ms on the server side; real visitors add their own network time.
 - **Per user:** every signal after sign-in carries `user.id`, `user.full_name` and `user.email`. Filter Website monitoring sessions on `user.email = ada@example.com` to list that shopper's sessions, and open one in Session Replay.
 - **Down to the query:** open the `POST /api/login` request span from any session. The browser span is the root, with shop-php's `POST /login` below it, and the `PDO::prepare`/`execute` spans for the `SELECT … FROM users` lookup and the `UPDATE users SET last_login_at` under that. shop-php sets `user.id` on its span and logs `user logged in` with the same trace ID.
 
@@ -427,7 +427,7 @@ This covers two questions: how long does signing in take for all users over a ti
 The script sets `LOGIN_SLOW_QUERY: "true"` in `shop-php-flags` and restarts shop-php. The user lookup becomes `SELECT … FROM users WHERE email = ? AND SLEEP(1.5) = 0`. The `SLEEP` is only evaluated for the matching row, so a sign-in with an unknown email stays fast.
 
 **What changes in Dash0:**
-- Start from the user experience: p95 of `login.duration_ms` jumps from a few hundred milliseconds to about 2 s, for every user, from the moment of the switch (`scenario slow-login: on` in the scenario-control logs).
+- Start from the user experience: `login.duration_ms` jumps by about 1.5 s (in-cluster sign-ins go from about 50 ms to about 1.6 s), for every user, from the moment of the switch (`scenario slow-login: on` in the scenario-control logs).
 - Pick any slow `user.login` event, open the session, and from its `POST /api/login` span follow the trace down: almost all of the 2 s is the single `SELECT … FROM users` database span with `db.query.text` showing the query.
 - In Session Replay, the **Sign in** button reads "Signing in…" for the whole wait.
 
@@ -439,7 +439,7 @@ The script sets `LOGIN_SLOW_QUERY: "true"` in `shop-php-flags` and restarts shop
 
 ### 10. CPU starvation (optional)
 
-`pricing-py` does about 25 ms of CPU work per price, in a `pricing.rules` span (it stands in for a pricing-rules engine). Normally it has no CPU limit, so that's quick. The scenario simulates a bad configuration change that gives it a 50m CPU limit. The kernel then throttles the container to 5 ms of CPU in every 100 ms, so each price takes hundreds of milliseconds, and checkout calls pricing once per cart line.
+`pricing-py` does about 25 ms of CPU work per price, in a `pricing.rules` span (it stands in for a pricing-rules engine). Normally it has no CPU limit, so that's quick. The scenario simulates a bad configuration change that gives it a 50m CPU limit. The kernel then throttles the container to 5 ms of CPU in every 100 ms, so each price takes up to a second or more, and checkout calls pricing once per cart line. On the reference cluster, checkout goes from about 0.4 s to between 1 and 6 s, and about one checkout in eight fails: shop-php gives each pricing call 3 seconds, and a starved call can take longer.
 
 **Trigger:**
 
@@ -450,9 +450,10 @@ The script sets `LOGIN_SLOW_QUERY: "true"` in `shop-php-flags` and restarts shop
 The script patches only the container's CPU limit, which rolls out a new pod, just as a real limit change would.
 
 **What to show in Dash0:**
-- **From the user's side:** the duration of the browser's `POST /api/checkout` request spans in Website monitoring rises from well under a second to a couple of seconds, so **Place order** takes noticeably longer. Session Replay shows "Placing order…" for the whole wait. The curl loadgen's `GET /checkout` on `shop-php` slows down the same way.
+- **From the user's side:** the duration of the browser's `POST /api/checkout` request spans in Website monitoring rises from well under a second to several seconds, so **Place order** takes noticeably longer, and some orders fail with "We couldn't place your order: checkout failed". Session Replay shows "Placing order…" for the whole wait. browser-loadgen logs those sessions with `session.outcome: checkout failed`. The curl loadgen's `GET /checkout` on `shop-php` slows down the same way.
 - **Down to the pod:** open a slow checkout trace. Under `shipping.quote`, every `GET /price/{product_id}` on `pricing-py` is slow, and inside each one the `pricing.rules` span takes most of the time, while the database span next to it stays fast. So the database isn't the problem; the service is starved of CPU.
-- **The resource:** on the `pricing-py` pod, `k8s.pod.cpu_limit_utilization` sits at or near 100% (1.0) while the scenario is on, and the deployment's rollout events show when the limit changed.
+- **The failures:** the failed checkouts have an error on shop-php's outgoing `GET` to pricing-py (a 3-second timeout), and shop-php logs `checkout failed` with the same trace ID.
+- **The resource:** on the `pricing-py` pod, `k8s.pod.cpu_limit_utilization` sits at or near 100% (1.0) while the scenario is on (`kubectl top` shows 49m of the 50m limit), and the deployment's rollout events show when the limit changed.
 
 **Reset:**
 
