@@ -276,6 +276,7 @@ function order(id) {
       o ? h("div", { class: "summary" },
             o.lines.map((l) => h("div", { class: "summary-line" }, h("span", {}, `${l.qty} × ${l.name}`), h("span", {}, money(l.price_cents * l.qty)))),
             h("div", { class: "summary-line" }, h("span", {}, "Shipping"), h("span", {}, money(o.shipping_cents))),
+            o.discount_cents ? h("div", { class: "summary-line" }, h("span", {}, `Discount (${o.discount_code})`), h("span", {}, `−${money(o.discount_cents)}`)) : null,
             h("div", { class: "summary-line total" }, h("span", {}, "Total"), h("span", {}, money(o.total_cents))))
         : null,
       link("/", { class: "button" }, "Continue shopping")),

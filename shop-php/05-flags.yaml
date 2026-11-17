@@ -10,3 +10,5 @@ data:
   CHECKOUT_SLOW_QUERY: "false"
   # "true" makes the POST /login user lookup wait 1.5 s in MySQL (scenario 9).
   LOGIN_SLOW_QUERY: "false"
+  # "true" makes checkout look up discounts with one query per active code instead of one query (scenario 11).
+  DISCOUNT_QUERY_PER_CODE: "false"

@@ -18,6 +18,10 @@ spec:
       labels:
         app.kubernetes.io/name: mysql
         app.kubernetes.io/part-of: otel-workshop
+      annotations:
+        # The init scripts only run on an empty data directory. Bump this when you change mysql-init, so the change
+        # (applied by kubectl or Argo CD) restarts MySQL and it seeds again.
+        otel-workshop/init-sql-version: "3"
     spec:
       containers:
         - name: mysql
