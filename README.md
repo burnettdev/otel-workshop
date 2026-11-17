@@ -83,6 +83,26 @@ Apply the namespace before the monitoring resource. If you apply the whole `base
 
 Deploy the monitoring resource before the apps. The operator instruments workloads when they're created, so this avoids a restart.
 
+### Deploy with Kustomize or Argo CD
+
+[`kustomization.yaml`](kustomization.yaml) at the repository root lists every component, so a GitOps tool can deploy the workshop as one app. It leaves out the shop-web token Secret (create it yourself, see "shop-web"), and the optional `alerts/` and `synthetics/`.
+
+The placeholders are still in the manifests, so point your tool at an overlay that replaces them rather than at this folder directly. For example:
+
+```yaml
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - https://github.com/your-org/otel-workshop?ref=main
+images:   # one entry per image built from an image/ folder
+  - name: REGISTRY/otel-workshop/shop-php
+    newName: ghcr.io/your-org/otel-workshop/shop-php
+patches:  # DASH0_OTLP_ENDPOINT and DASH0_DATASET in shop-web, and the Ingress host
+  - ...
+```
+
+**With Argo CD, leave the scenario switches alone.** The scenario scripts and the control panel change resources on purpose: the `shop-php-flags` and `payment-java-flags` data, the replicas of `memory-leak` and `academy-site`, pricing-py's CPU limit, and the `kubectl.kubernetes.io/restartedAt` annotation of restarted deployments. With self-heal on, Argo CD would undo each switch within seconds. List those fields under `ignoreDifferences` in the Application and add the sync option `RespectIgnoreDifferences=true`. In Argo CD, deploy the namespace and the monitoring resource before the apps with `argocd.argoproj.io/sync-wave` annotations (for example `-2` and `-1`).
+
 ### base
 
 The `Dash0Monitoring` resource turns on:
