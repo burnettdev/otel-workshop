@@ -1,0 +1,32 @@
+# The whole workshop as one Kustomize app, for GitOps tools such as Argo CD (see README, "Deploy with Kustomize or
+# Argo CD"). The placeholders stay as they are: an overlay replaces them (images, patches).
+#
+# Left out on purpose:
+# - shop-web/00-dash0-web-secret.yaml: it only holds the token placeholder. Create the secret yourself, or a sync
+#   would overwrite your token with the placeholder.
+# - alerts/ and synthetics/: optional, and synthetics need a private location first. Add them in your overlay.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - base/00-namespace.yaml
+  - base/10-dash0-monitoring.yaml
+  - mysql/00-secret.yaml
+  - mysql/10-init-sql.yaml
+  - mysql/20-mysql.yaml
+  - pricing-py/10-pricing-py.yaml
+  - recommendations-node/10-recommendations-node.yaml
+  - inventory-go/10-inventory-go.yaml
+  - payment-java/05-flags.yaml
+  - payment-java/10-payment-java.yaml
+  - shop-php/05-flags.yaml
+  - shop-php/10-shop-php.yaml
+  - loadgen/10-loadgen.yaml
+  - browser-loadgen/10-browser-loadgen.yaml
+  - shop-web/10-shop-web.yaml
+  - academy-site/00-pvc-uploads.yaml
+  - academy-site/10-academy-site.yaml
+  - uploads-sync/10-uploads-sync.yaml
+  - memory-leak/10-memory-leak.yaml
+  - scenario-control/00-rbac.yaml
+  - scenario-control/10-scenario-control.yaml
+  - ingress/10-ingress.yaml

@@ -1,3 +1,4 @@
+import hashlib
 import json
 import logging
 import os
@@ -36,6 +37,18 @@ logging.basicConfig(level=logging.INFO, handlers=[handler], force=True)
 log = logging.getLogger("pricing")
 
 app = FastAPI(title="pricing-py")
+tracer = trace.get_tracer("pricing-py")
+
+# CPU work per price, in its own span. It stands in for a pricing-rules engine: about 25 ms of one core on the
+# reference node, which is nothing until the pod is held to a tight CPU limit (scenario 10, ./cpu-starvation.sh).
+RULES_ITERATIONS = int(os.environ.get("PRICING_RULES_ITERATIONS", "150000"))
+
+
+def apply_pricing_rules(product_id, price_cents):
+    with tracer.start_as_current_span("pricing.rules") as span:
+        span.set_attribute("product.id", product_id)
+        hashlib.pbkdf2_hmac("sha256", str(price_cents).encode(), str(product_id).encode(), RULES_ITERATIONS)
+    return price_cents
 
 
 def connect():
@@ -63,5 +76,6 @@ def price(product_id: int):
         raise HTTPException(status_code=404, detail="unknown product")
 
     _, name, price_cents, weight_g = row
+    price_cents = apply_pricing_rules(product_id, price_cents)
     log.info("priced product", extra={"fields": {"product.id": product_id, "price_cents": price_cents}})
     return {"id": product_id, "name": name, "price_cents": price_cents, "weight_g": weight_g, "currency": "EUR"}

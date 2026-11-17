@@ -44,13 +44,14 @@ grep -rlE 'REGISTRY/|YOUR_REGION|YOUR_DATASET' --include='*.yaml' . | xargs sed 
 | Folder | What it contains |
 | --- | --- |
 | [`base/`](base/) | The `otel-workshop` namespace and its `Dash0Monitoring` resource |
-| [`mysql/`](mysql/) | MySQL 8.4 with a seeded `products` table (12 rows) |
-| [`pricing-py/`](pricing-py/) | Python FastAPI service, `GET /price/{id}` |
-| [`shop-php/`](shop-php/) | PHP 8.3 Slim app, the API behind the storefront: `GET /products`, `GET /products/{id}`, `GET`/`POST /checkout`, `GET /slow` |
+| [`mysql/`](mysql/) | MySQL 8.4 with seeded `products` (12 rows) and `users` (20 shopper accounts) tables |
+| [`pricing-py/`](pricing-py/) | Python FastAPI service, `GET /price/{id}`, plus `cpu-starvation.sh` |
+| [`shop-php/`](shop-php/) | PHP 8.3 Slim app, the API behind the storefront: `GET /products`, `GET /products/{id}`, `GET`/`POST /checkout`, `POST /login`, `GET /slow` |
 | [`recommendations-node/`](recommendations-node/) | Node.js Express service, `GET /recommendations?product={id}` |
 | [`inventory-go/`](inventory-go/) | Go service, `GET /stock/{id}` |
 | [`payment-java/`](payment-java/) | Java Spring Boot service, `POST /payments`, with a switchable failure rate |
 | [`loadgen/`](loadgen/) | curl loop calling the product list, a product page, checkout and `/slow` every 3 seconds |
+| [`browser-loadgen/`](browser-loadgen/) | Headless Chromium running real storefront sessions, each signed in as one of the 20 shopper accounts |
 | [`academy-site/`](academy-site/) | nginx site, 1 replica, mounting the exclusive `uploads` PVC |
 | [`uploads-sync/`](uploads-sync/) | CronJob that needs the same PVC, plus `trigger-incident.sh` and `recover.sh` |
 | [`shop-web/`](shop-web/) | Storefront (nginx) with the Dash0 Web SDK and Session Replay, proxying `/api` to shop-php |
@@ -72,6 +73,7 @@ kubectl wait -n otel-workshop deploy/mysql --for=condition=Available --timeout=1
 kubectl apply -f pricing-py/ -f recommendations-node/ -f inventory-go/ -f payment-java/ -f shop-php/
 kubectl apply -f loadgen/
 kubectl apply -f shop-web/        # set the Dash0 auth token first, see "shop-web" below
+kubectl apply -f browser-loadgen/
 kubectl apply -f academy-site/ -f uploads-sync/ -f memory-leak/
 kubectl apply -f alerts/
 kubectl apply -f scenario-control/ -f ingress/   # set your hostname in ingress/ first
@@ -80,6 +82,26 @@ kubectl apply -f scenario-control/ -f ingress/   # set your hostname in ingress/
 Apply the namespace before the monitoring resource. If you apply the whole `base/` folder in one command on a fresh cluster, the monitoring resource can fail with `namespaces "otel-workshop" not found`. Running the command again fixes it.
 
 Deploy the monitoring resource before the apps. The operator instruments workloads when they're created, so this avoids a restart.
+
+### Deploy with Kustomize or Argo CD
+
+[`kustomization.yaml`](kustomization.yaml) at the repository root lists every component, so a GitOps tool can deploy the workshop as one app. It leaves out the shop-web token Secret (create it yourself, see "shop-web"), and the optional `alerts/` and `synthetics/`.
+
+The placeholders are still in the manifests, so point your tool at an overlay that replaces them rather than at this folder directly. For example:
+
+```yaml
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - https://github.com/your-org/otel-workshop?ref=main
+images:   # one entry per image built from an image/ folder
+  - name: REGISTRY/otel-workshop/shop-php
+    newName: ghcr.io/your-org/otel-workshop/shop-php
+patches:  # DASH0_OTLP_ENDPOINT and DASH0_DATASET in shop-web, and the Ingress host
+  - ...
+```
+
+**With Argo CD, leave the scenario switches alone.** The scenario scripts and the control panel change resources on purpose: the `shop-php-flags` and `payment-java-flags` data, the replicas of `memory-leak` and `academy-site`, pricing-py's CPU limit, and the `kubectl.kubernetes.io/restartedAt` annotation of restarted deployments. With self-heal on, Argo CD would undo each switch within seconds. List those fields under `ignoreDifferences` in the Application and add the sync option `RespectIgnoreDifferences=true`. In Argo CD, deploy the namespace and the monitoring resource before the apps with `argocd.argoproj.io/sync-wave` annotations (for example `-2` and `-1`).
 
 ### base
 
@@ -95,6 +117,8 @@ To check the status, run `kubectl get dash0monitoring -n otel-workshop`. `AVAILA
 ### mysql
 
 The `shop` database is seeded from the `mysql-init` ConfigMap. Storage is an `emptyDir`, so deleting the pod gives you a freshly seeded database. The credentials in `00-secret.yaml` are demo-only.
+
+The `users` table holds 20 shopper accounts (`ada@example.com` to `tomas@example.com`), all with the password `maker-supply-demo`. `browser-loadgen` signs in with the same list, so if you change one, change the other. If you update the ConfigMap on a running cluster, restart MySQL so it seeds again: `kubectl rollout restart -n otel-workshop deploy/mysql`.
 
 ### How the services are instrumented
 
@@ -131,6 +155,8 @@ A small storefront served by nginx: product grid, product pages with recommendat
 - **End-to-end traces:** the page calls shop-php through nginx at `/api/...` → `http://shop-php/...`. Because that's the page's own origin, the SDK adds a `traceparent` header to those requests automatically, without any `propagators` setting. shop-php's spans become children of the browser's request span. nginx isn't traced itself, but its JSON access log records the trace and span IDs from `traceparent`, so `/api` log lines link to the same trace.
 - **Session Replay:** turned on by loading `dash0-session-recording.iife.js`. Every input, textarea and select is masked (`maskAllInputs: true`, the default), so the form values show up as asterisks in the replay.
 - **Errors:** uncaught errors and unhandled promise rejections are captured by the SDK.
+- **Signed-in users:** **Sign in** in the header posts to `POST /api/login`. On success the page calls `dash0("identify", id, { fullName, email })`, which adds `user.id`, `user.full_name` and `user.email` to every signal from then on. It's called again on every page load, because the SDK doesn't remember it. Signing out removes the attributes.
+- **Login timing:** each sign-in attempt sends a custom event, `user.login`, with `login.outcome` (`success`, `rejected` or `error`) and `login.duration_ms`, the time from clicking **Sign in** to being signed in. That's the time the shopper waited, including the network, not just the server's share (scenario 9).
 - **CSP:** `script-src 'self'`, `style-src 'self'` and `connect-src 'self' <Dash0 endpoint>`. There are no inline scripts. The SDK settings come from `/dash0-config.js`, which nginx generates from the pod's environment. `blob:` workers aren't allowed, because the recorder only needs one for canvas recording, which is off.
 
 **Set the token before deploying.** The SDK needs an **ingest-only** Dash0 auth token. It's visible to anyone who loads the page, so don't use a token with broader permissions. Either replace `REPLACE_WITH_INGEST_ONLY_TOKEN` in `shop-web/00-dash0-web-secret.yaml`, or create the Secret directly so the token never lands in a file:
@@ -159,21 +185,38 @@ kubectl port-forward -n otel-workshop svc/shop-web 8081:80
 
 Then browse to <http://localhost:8081>. Use `localhost` rather than another hostname: browsers treat `http://localhost` as a secure context but not other plain-HTTP hosts.
 
+### browser-loadgen
+
+The curl `loadgen` only calls the backend, so without this component the only browser sessions in Dash0 are the ones you click through yourself. `browser-loadgen` runs headless Chromium (Playwright 1.55) and keeps two shopper sessions going at a time. Each session:
+
+1. opens a fresh browser context, so the Web SDK starts a new session,
+2. signs in as a random account from the `users` table; about one sign-in in ten starts with a mistyped password,
+3. opens one to three product pages and usually adds something to the cart,
+4. checks out in about 80% of the sessions that have a cart, and
+5. leaves the page, so the SDK sends what it has batched.
+
+The sessions use a mix of desktop and mobile Chrome profiles. Each one logs a `session finished` line with `user.email` and `session.outcome` (`ordered`, `checkout failed`, `abandoned cart`, `browsed` or `error`). `CONCURRENCY` and `PAUSE_SECONDS` in the manifest set the load. On a 2-core node, two concurrent sessions use about half a core.
+
+The pod carries the label `dash0.com/enable: "false"`, so the operator doesn't inject its Node.js agent into the Playwright driver. The browser's own telemetry goes from the Web SDK straight to Dash0, like a real visitor's.
+
+shop-web is plain HTTP inside the cluster, and the Web SDK needs a secure context. Chromium is started with `--unsafely-treat-insecure-origin-as-secure` for the shop's in-cluster origin, the same treatment browsers give `http://localhost`.
+
 ### Building the images
 
-The six services and the scenario control panel are built from their `image/` folders; no prebuilt images are published. Build for your nodes' CPU architecture (`kubectl get nodes -o jsonpath='{.items[*].status.nodeInfo.architecture}'`), here `amd64`, and push to your registry. Build from a clean checkout, so the commit you pass in is the code in the image:
+The six services, the scenario control panel and the browser load generator are built from their `image/` folders; no prebuilt images are published. Build for your nodes' CPU architecture (`kubectl get nodes -o jsonpath='{.items[*].status.nodeInfo.architecture}'`), here `amd64`, and push to your registry. Build from a clean checkout, so the commit you pass in is the code in the image:
 
 ```sh
 REV=$(git rev-parse HEAD)
 REPO=https://github.com/your-org/otel-workshop   # your copy of this repository
 
-docker buildx build --platform linux/amd64 --build-arg VCS_REVISION=$REV --build-arg VCS_REPOSITORY_URL=$REPO -t REGISTRY/otel-workshop/shop-php:0.3.2 --push shop-php/image
-docker buildx build --platform linux/amd64 --build-arg VCS_REVISION=$REV --build-arg VCS_REPOSITORY_URL=$REPO -t REGISTRY/otel-workshop/pricing-py:0.1.1 --push pricing-py/image
+docker buildx build --platform linux/amd64 --build-arg VCS_REVISION=$REV --build-arg VCS_REPOSITORY_URL=$REPO -t REGISTRY/otel-workshop/shop-php:0.4.0 --push shop-php/image
+docker buildx build --platform linux/amd64 --build-arg VCS_REVISION=$REV --build-arg VCS_REPOSITORY_URL=$REPO -t REGISTRY/otel-workshop/pricing-py:0.2.0 --push pricing-py/image
 docker buildx build --platform linux/amd64 --build-arg VCS_REVISION=$REV --build-arg VCS_REPOSITORY_URL=$REPO -t REGISTRY/otel-workshop/recommendations-node:0.1.2 --push recommendations-node/image
 docker buildx build --platform linux/amd64 --build-arg VCS_REVISION=$REV --build-arg VCS_REPOSITORY_URL=$REPO -t REGISTRY/otel-workshop/inventory-go:0.1.3 --push inventory-go/image
 docker buildx build --platform linux/amd64 --build-arg VCS_REVISION=$REV --build-arg VCS_REPOSITORY_URL=$REPO -t REGISTRY/otel-workshop/payment-java:0.1.1 --push payment-java/image
-docker buildx build --platform linux/amd64 --build-arg VCS_REVISION=$REV --build-arg VCS_REPOSITORY_URL=$REPO -t REGISTRY/otel-workshop/shop-web:0.2.2 --push shop-web/image
-docker buildx build --platform linux/amd64 --build-arg VCS_REVISION=$REV --build-arg VCS_REPOSITORY_URL=$REPO -t REGISTRY/otel-workshop/scenario-control:0.1.2 --push scenario-control/image
+docker buildx build --platform linux/amd64 --build-arg VCS_REVISION=$REV --build-arg VCS_REPOSITORY_URL=$REPO -t REGISTRY/otel-workshop/shop-web:0.3.0 --push shop-web/image
+docker buildx build --platform linux/amd64 --build-arg VCS_REVISION=$REV --build-arg VCS_REPOSITORY_URL=$REPO -t REGISTRY/otel-workshop/scenario-control:0.2.0 --push scenario-control/image
+docker buildx build --platform linux/amd64 --build-arg VCS_REVISION=$REV --build-arg VCS_REPOSITORY_URL=$REPO -t REGISTRY/otel-workshop/browser-loadgen:0.1.2 --push browser-loadgen/image
 ```
 
 **Version-control attributes.** The two build args end up in the telemetry, so every span, log and metric says which commit and repository it came from:
@@ -199,7 +242,7 @@ The load generator keeps traffic flowing in the background. To pause it, run `ku
 
 ### Scenario control panel
 
-`https://shop.example.com/flags` (your hostname) has an on/off switch for each scenario that needs one: slow checkout, failing payments, the OOMKilled crash loop, and the stuck sync job (trigger and recover). It does the same as the scripts below, and you can mix the two: the page shows the current state, whichever way it was changed. It refreshes every 5 seconds. Switching slow checkout or failing payments restarts the service, so the page shows "restarting" for a few seconds.
+`https://shop.example.com/flags` (your hostname) has an on/off switch for each scenario that needs one: slow checkout, slow login, CPU starvation, failing payments, the OOMKilled crash loop, and the stuck sync job (trigger and recover). It does the same as the scripts below, and you can mix the two: the page shows the current state, whichever way it was changed. It refreshes every 5 seconds. Switching slow checkout, slow login, CPU starvation or failing payments restarts the service, so the page shows "restarting" for a few seconds.
 
 Each switch writes a log line such as `scenario slow-checkout: on` from `scenario-control`, so in Dash0 you can see exactly when each scenario started.
 
@@ -384,6 +427,62 @@ The script sets `PAYMENT_FAILURE_RATE` and restarts `payment-java`, which takes 
 ./payment-java/payment-failures.sh off
 ```
 
+### 9. Login time across every session
+
+This covers two questions: how long does signing in take for all users over a time period, and when it gets slower, why, and who is affected?
+
+**Baseline:** with `browser-loadgen` running, every session signs in. Nothing to trigger.
+
+**What to show in Dash0:**
+- **Across sessions:** in the logs, filter on `event.name = user.login` from service `shop-web` and chart `login.duration_ms` (p50 and p95) over time. Group by `login.outcome` to separate successful sign-ins from mistyped passwords, or by `user.email` to compare shoppers. From `browser-loadgen`, which runs next to the shop, a sign-in normally takes well under 100 ms on the server side; real visitors add their own network time.
+- **Per user:** every signal after sign-in carries `user.id`, `user.full_name` and `user.email`. Filter Website monitoring sessions on `user.email = ada@example.com` to list that shopper's sessions, and open one in Session Replay.
+- **Down to the query:** open the `POST /api/login` request span from any session. The browser span is the root, with shop-php's `POST /login` below it, and the `PDO::prepare`/`execute` spans for the `SELECT … FROM users` lookup and the `UPDATE users SET last_login_at` under that. shop-php sets `user.id` on its span and logs `user logged in` with the same trace ID.
+
+**Trigger the slow login:**
+
+```sh
+./shop-php/slow-login.sh on
+```
+
+The script sets `LOGIN_SLOW_QUERY: "true"` in `shop-php-flags` and restarts shop-php. The user lookup becomes `SELECT … FROM users WHERE email = ? AND SLEEP(1.5) = 0`. The `SLEEP` is only evaluated for the matching row, so a sign-in with an unknown email stays fast.
+
+**What changes in Dash0:**
+- Start from the user experience: `login.duration_ms` jumps by about 1.5 s (in-cluster sign-ins go from about 50 ms to about 1.6 s), for every user, from the moment of the switch (`scenario slow-login: on` in the scenario-control logs).
+- Pick any slow `user.login` event, open the session, and from its `POST /api/login` span follow the trace down: almost all of the 2 s is the single `SELECT … FROM users` database span with `db.query.text` showing the query.
+- In Session Replay, the **Sign in** button reads "Signing in…" for the whole wait.
+
+**Reset:**
+
+```sh
+./shop-php/slow-login.sh off
+```
+
+### 10. CPU starvation (optional)
+
+`pricing-py` does about 25 ms of CPU work per price, in a `pricing.rules` span (it stands in for a pricing-rules engine). Normally it has no CPU limit, so that's quick. The scenario simulates a bad configuration change that gives it a 50m CPU limit. The kernel then throttles the container to 5 ms of CPU in every 100 ms, so each price takes up to a second or more, and checkout calls pricing once per cart line. On the reference cluster, checkout goes from about 0.4 s to between 1 and 6 s, and about one checkout in eight fails: shop-php gives each pricing call 3 seconds, and a starved call can take longer.
+
+**Trigger:**
+
+```sh
+./pricing-py/cpu-starvation.sh on
+```
+
+The script patches only the container's CPU limit, which rolls out a new pod, just as a real limit change would.
+
+**What to show in Dash0:**
+- **From the user's side:** the duration of the browser's `POST /api/checkout` request spans in Website monitoring rises from well under a second to several seconds, so **Place order** takes noticeably longer, and some orders fail with "We couldn't place your order: checkout failed". Session Replay shows "Placing order…" for the whole wait. browser-loadgen logs those sessions with `session.outcome: checkout failed`. The curl loadgen's `GET /checkout` on `shop-php` slows down the same way.
+- **Down to the pod:** open a slow checkout trace. Under `shipping.quote`, every `GET /price/{product_id}` on `pricing-py` is slow, and inside each one the `pricing.rules` span takes most of the time, while the database span next to it stays fast. So the database isn't the problem; the service is starved of CPU.
+- **The failures:** the failed checkouts have an error on shop-php's outgoing `GET` to pricing-py (a 3-second timeout), and shop-php logs `checkout failed` with the same trace ID.
+- **The resource:** on the `pricing-py` pod, `k8s.pod.cpu_limit_utilization` sits at or near 100% (1.0) while the scenario is on (`kubectl top` shows 49m of the 50m limit), and the deployment's rollout events show when the limit changed.
+
+**Reset:**
+
+```sh
+./pricing-py/cpu-starvation.sh off
+```
+
+Re-applying `pricing-py/` also removes the limit.
+
 ## Synthetic checks
 
 [`synthetics/10-storefront-checks.yaml`](synthetics/10-storefront-checks.yaml) defines three Dash0 synthetic checks, each running every minute. The operator syncs them into Dash0 (folder `/otel-workshop`).
@@ -471,7 +570,7 @@ kubectl delete -f ingress/ -f scenario-control/ --ignore-not-found
 kubectl delete -f alerts/
 kubectl delete -f synthetics/ --ignore-not-found
 kubectl delete -f memory-leak/ --ignore-not-found
-kubectl delete -f shop-web/
+kubectl delete -f browser-loadgen/ -f shop-web/
 kubectl delete -f uploads-sync/ -f academy-site/
 kubectl delete -f loadgen/ -f shop-php/ -f payment-java/ -f inventory-go/ -f recommendations-node/ -f pricing-py/ -f mysql/
 kubectl delete -f base/10-dash0-monitoring.yaml   # lets the operator remove instrumentation cleanly
