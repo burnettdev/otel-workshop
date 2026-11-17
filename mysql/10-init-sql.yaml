@@ -58,3 +58,24 @@ data:
       (18, 'rosa@example.com',    'Rosa Almeida',    @hash),
       (19, 'sami@example.com',    'Sami Virtanen',   @hash),
       (20, 'tomas@example.com',   'Tomas Novak',     @hash);
+  # Discount codes for checkout (scenario 11). percent_off is unique among active codes, so "the best discount" has
+  # one answer whichever way it's looked up.
+  03-discounts.sql: |
+    CREATE TABLE discounts (
+      code               VARCHAR(32) PRIMARY KEY,
+      description        VARCHAR(100) NOT NULL,
+      percent_off        INT NOT NULL,
+      min_subtotal_cents INT NOT NULL,
+      active             TINYINT(1) NOT NULL
+    );
+    INSERT INTO discounts (code, description, percent_off, min_subtotal_cents, active) VALUES
+      ('PRINTDAY3',  'Print day',               3,     0, 1),
+      ('WELCOME5',   'Welcome discount',        5,     0, 1),
+      ('NOZZLE7',    'Nozzle week',             7,  2000, 1),
+      ('PLATE8',     'Build plate bundle',      8,  3000, 1),
+      ('FILAMENT10', 'Filament fan',           10,  5000, 1),
+      ('LOYAL11',    'Loyal maker',            11,  7500, 1),
+      ('MAKER15',    'Big project',            15, 10000, 1),
+      ('BULK20',     'Bulk order',             20, 20000, 1),
+      ('SUMMER25',   'Summer sale (ended)',    25,     0, 0),
+      ('BLACKFRI30', 'Black Friday (ended)',   30,     0, 0);

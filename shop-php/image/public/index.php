@@ -45,8 +45,51 @@ final class OutOfStock extends RuntimeException
 }
 
 /**
- * Checks stock, prices the items and quotes shipping (inside the shipping.quote span), then charges
- * the payment service. $items is a list of ['id' => int, 'qty' => int].
+ * The best active discount for a subtotal, in a checkout.discounts span with the number of queries it took
+ * (discount.queries). Normally that's one query. DISCOUNT_QUERY_PER_CODE=true switches to the N+1 version of
+ * scenario 11: list the active codes, then look each one up separately. Same answer, nine queries instead of one,
+ * and only a few milliseconds slower. Returns ['code' => ?string, 'cents' => int].
+ */
+function bestDiscount(PDO $db, int $subtotal): array
+{
+    $tracer = Globals::tracerProvider()->getTracer('shop-php');
+    $span = $tracer->spanBuilder('checkout.discounts')->startSpan();
+    $scope = $span->activate();
+    try {
+        $best = null;
+        $queries = 0;
+        if (getenv('DISCOUNT_QUERY_PER_CODE') === 'true') {
+            $codes = $db->query('SELECT code FROM discounts WHERE active = 1')->fetchAll(PDO::FETCH_COLUMN);
+            $queries++;
+            $statement = $db->prepare('SELECT code, percent_off, min_subtotal_cents FROM discounts WHERE code = ?');
+            foreach ($codes as $code) {
+                $statement->execute([$code]);
+                $queries++;
+                $row = $statement->fetch(PDO::FETCH_ASSOC);
+                if ((int) $row['min_subtotal_cents'] <= $subtotal && ($best === null || $row['percent_off'] > $best['percent_off'])) {
+                    $best = $row;
+                }
+            }
+        } else {
+            $statement = $db->prepare(
+                'SELECT code, percent_off FROM discounts WHERE active = 1 AND min_subtotal_cents <= ? ORDER BY percent_off DESC LIMIT 1'
+            );
+            $statement->execute([$subtotal]);
+            $queries++;
+            $best = $statement->fetch(PDO::FETCH_ASSOC) ?: null;
+        }
+        $span->setAttribute('discount.queries', $queries);
+        $span->setAttribute('discount.code', $best['code'] ?? '');
+        return ['code' => $best['code'] ?? null, 'cents' => $best ? intdiv($subtotal * (int) $best['percent_off'], 100) : 0];
+    } finally {
+        $scope->detach();
+        $span->end();
+    }
+}
+
+/**
+ * Checks stock, prices the items and quotes shipping (inside the shipping.quote span), applies the best discount,
+ * then charges the payment service. $items is a list of ['id' => int, 'qty' => int].
  */
 function checkout(Response $response, array $items): Response
 {
@@ -90,11 +133,20 @@ function checkout(Response $response, array $items): Response
         $span->end();
     }
 
+    // A failed discount lookup shouldn't stop the order: the shopper just pays full price.
+    try {
+        $discount = bestDiscount(db(), $subtotal);
+    } catch (Throwable $e) {
+        Log::warning('discount lookup failed', ['error' => $e->getMessage()]);
+        $discount = ['code' => null, 'cents' => 0];
+    }
+    $total = $subtotal + $shipping - $discount['cents'];
+
     $orderId = 'ord_' . bin2hex(random_bytes(4));
     try {
         $payment = json_decode((string) client('PAYMENT_URL')->post('/payments', ['json' => [
             'orderId' => $orderId,
-            'amountCents' => $subtotal + $shipping,
+            'amountCents' => $total,
             'currency' => 'EUR',
         ]])->getBody(), true);
     } catch (Throwable $e) {
@@ -105,7 +157,8 @@ function checkout(Response $response, array $items): Response
     Log::info('order placed', [
         'order.id' => $orderId,
         'order.items' => count($items),
-        'order.total_cents' => $subtotal + $shipping,
+        'order.total_cents' => $total,
+        'order.discount_code' => $discount['code'],
     ]);
     return json($response, [
         'order_id' => $orderId,
@@ -113,7 +166,9 @@ function checkout(Response $response, array $items): Response
         'lines' => $lines,
         'subtotal_cents' => $subtotal,
         'shipping_cents' => $shipping,
-        'total_cents' => $subtotal + $shipping,
+        'discount_code' => $discount['code'],
+        'discount_cents' => $discount['cents'],
+        'total_cents' => $total,
     ]);
 }
 

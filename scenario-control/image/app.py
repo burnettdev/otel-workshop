@@ -1,6 +1,6 @@
 """scenario-control: a web page that switches the workshop scenarios on and off.
 
-It does what the scripts in each scenario's folder do (slow-checkout.sh, slow-login.sh, cpu-starvation.sh,
+It does what the scripts in each scenario's folder do (slow-checkout.sh, slow-login.sh, discount-storm.sh, cpu-starvation.sh,
 payment-failures.sh, oom-crashloop.sh, trigger-incident.sh, recover.sh), through the Kubernetes API with the pod's service account. Standard library
 only. Served under /flags, the path the Ingress routes here.
 """
@@ -151,6 +151,7 @@ def scenarios():
     """Current state of each scenario, as (id, title, description, state, is_on, actions)."""
     slow = configmap_value("shop-php-flags", "CHECKOUT_SLOW_QUERY") == "true"
     slow_login = configmap_value("shop-php-flags", "LOGIN_SLOW_QUERY") == "true"
+    storm = configmap_value("shop-php-flags", "DISCOUNT_QUERY_PER_CODE") == "true"
     starved = cpu_limit("pricing-py") != ""
     rate = configmap_value("payment-java-flags", "PAYMENT_FAILURE_RATE") or "0"
     leak = k8s("GET", deployment_path("memory-leak"))["spec"]["replicas"] > 0
@@ -173,6 +174,9 @@ def scenarios():
          "Every sign-in runs a user lookup that takes 1.5 s in MySQL. Compare login time across sessions in Dash0.",
          ("On" if slow_login else "Off") + restarting("shop-php"), slow_login,
          [("off", "Turn off")] if slow_login else [("on", "Turn on")]),
+        ("discount-storm", "Discount query storm",
+         "Checkout looks up discounts one code at a time: nine SQL queries instead of one, with no visible slowdown.",
+         ("On" if storm else "Off") + restarting("shop-php"), storm, [("off", "Turn off")] if storm else [("on", "Turn on")]),
         ("cpu-starvation", "CPU starvation",
          f"pricing-py is held to a {PRICING_CPU_LIMIT_ON} CPU limit and throttled, so checkout slows down for shoppers.",
          (f"On ({cpu_limit('pricing-py')} limit)" if starved else "Off") + restarting("pricing-py"), starved,
@@ -196,6 +200,8 @@ def act(scenario, action):
         set_flag_and_restart("shop-php-flags", "CHECKOUT_SLOW_QUERY", "true" if action == "on" else "false", "shop-php")
     elif scenario == "slow-login" and action in ("on", "off"):
         set_flag_and_restart("shop-php-flags", "LOGIN_SLOW_QUERY", "true" if action == "on" else "false", "shop-php")
+    elif scenario == "discount-storm" and action in ("on", "off"):
+        set_flag_and_restart("shop-php-flags", "DISCOUNT_QUERY_PER_CODE", "true" if action == "on" else "false", "shop-php")
     elif scenario == "cpu-starvation" and action in ("on", "off"):
         set_cpu_limit("pricing-py", PRICING_CPU_LIMIT_ON if action == "on" else None)
     elif scenario == "payment-failures" and action in ("on", "off"):

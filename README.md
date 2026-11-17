@@ -44,7 +44,7 @@ grep -rlE 'REGISTRY/|YOUR_REGION|YOUR_DATASET' --include='*.yaml' . | xargs sed 
 | Folder | What it contains |
 | --- | --- |
 | [`base/`](base/) | The `otel-workshop` namespace and its `Dash0Monitoring` resource |
-| [`mysql/`](mysql/) | MySQL 8.4 with seeded `products` (12 rows) and `users` (20 shopper accounts) tables |
+| [`mysql/`](mysql/) | MySQL 8.4 with seeded `products` (12 rows), `users` (20 shopper accounts) and `discounts` (10 codes) tables |
 | [`pricing-py/`](pricing-py/) | Python FastAPI service, `GET /price/{id}`, plus `cpu-starvation.sh` |
 | [`shop-php/`](shop-php/) | PHP 8.3 Slim app, the API behind the storefront: `GET /products`, `GET /products/{id}`, `GET`/`POST /checkout`, `POST /login`, `GET /slow` |
 | [`recommendations-node/`](recommendations-node/) | Node.js Express service, `GET /recommendations?product={id}` |
@@ -118,7 +118,7 @@ To check the status, run `kubectl get dash0monitoring -n otel-workshop`. `AVAILA
 
 The `shop` database is seeded from the `mysql-init` ConfigMap. Storage is an `emptyDir`, so deleting the pod gives you a freshly seeded database. The credentials in `00-secret.yaml` are demo-only.
 
-The `users` table holds 20 shopper accounts (`ada@example.com` to `tomas@example.com`), all with the password `maker-supply-demo`. `browser-loadgen` signs in with the same list, so if you change one, change the other. If you update the ConfigMap on a running cluster, restart MySQL so it seeds again: `kubectl rollout restart -n otel-workshop deploy/mysql`.
+The `users` table holds 20 shopper accounts (`ada@example.com` to `tomas@example.com`), all with the password `maker-supply-demo`. `browser-loadgen` signs in with the same list, so if you change one, change the other. The init scripts only run on an empty data directory, so when you change the `mysql-init` ConfigMap, also bump the `otel-workshop/init-sql-version` annotation in `20-mysql.yaml`. Applying both restarts MySQL and it seeds again, which also works when Argo CD does the applying.
 
 ### How the services are instrumented
 
@@ -209,13 +209,13 @@ The six services, the scenario control panel and the browser load generator are 
 REV=$(git rev-parse HEAD)
 REPO=https://github.com/your-org/otel-workshop   # your copy of this repository
 
-docker buildx build --platform linux/amd64 --build-arg VCS_REVISION=$REV --build-arg VCS_REPOSITORY_URL=$REPO -t REGISTRY/otel-workshop/shop-php:0.4.0 --push shop-php/image
+docker buildx build --platform linux/amd64 --build-arg VCS_REVISION=$REV --build-arg VCS_REPOSITORY_URL=$REPO -t REGISTRY/otel-workshop/shop-php:0.5.0 --push shop-php/image
 docker buildx build --platform linux/amd64 --build-arg VCS_REVISION=$REV --build-arg VCS_REPOSITORY_URL=$REPO -t REGISTRY/otel-workshop/pricing-py:0.2.0 --push pricing-py/image
 docker buildx build --platform linux/amd64 --build-arg VCS_REVISION=$REV --build-arg VCS_REPOSITORY_URL=$REPO -t REGISTRY/otel-workshop/recommendations-node:0.1.2 --push recommendations-node/image
 docker buildx build --platform linux/amd64 --build-arg VCS_REVISION=$REV --build-arg VCS_REPOSITORY_URL=$REPO -t REGISTRY/otel-workshop/inventory-go:0.1.3 --push inventory-go/image
 docker buildx build --platform linux/amd64 --build-arg VCS_REVISION=$REV --build-arg VCS_REPOSITORY_URL=$REPO -t REGISTRY/otel-workshop/payment-java:0.1.1 --push payment-java/image
-docker buildx build --platform linux/amd64 --build-arg VCS_REVISION=$REV --build-arg VCS_REPOSITORY_URL=$REPO -t REGISTRY/otel-workshop/shop-web:0.3.0 --push shop-web/image
-docker buildx build --platform linux/amd64 --build-arg VCS_REVISION=$REV --build-arg VCS_REPOSITORY_URL=$REPO -t REGISTRY/otel-workshop/scenario-control:0.2.0 --push scenario-control/image
+docker buildx build --platform linux/amd64 --build-arg VCS_REVISION=$REV --build-arg VCS_REPOSITORY_URL=$REPO -t REGISTRY/otel-workshop/shop-web:0.3.1 --push shop-web/image
+docker buildx build --platform linux/amd64 --build-arg VCS_REVISION=$REV --build-arg VCS_REPOSITORY_URL=$REPO -t REGISTRY/otel-workshop/scenario-control:0.3.0 --push scenario-control/image
 docker buildx build --platform linux/amd64 --build-arg VCS_REVISION=$REV --build-arg VCS_REPOSITORY_URL=$REPO -t REGISTRY/otel-workshop/browser-loadgen:0.1.2 --push browser-loadgen/image
 ```
 
@@ -242,7 +242,7 @@ The load generator keeps traffic flowing in the background. To pause it, run `ku
 
 ### Scenario control panel
 
-`https://shop.example.com/flags` (your hostname) has an on/off switch for each scenario that needs one: slow checkout, slow login, CPU starvation, failing payments, the OOMKilled crash loop, and the stuck sync job (trigger and recover). It does the same as the scripts below, and you can mix the two: the page shows the current state, whichever way it was changed. It refreshes every 5 seconds. Switching slow checkout, slow login, CPU starvation or failing payments restarts the service, so the page shows "restarting" for a few seconds.
+`https://shop.example.com/flags` (your hostname) has an on/off switch for each scenario that needs one: slow checkout, slow login, discount query storm, CPU starvation, failing payments, the OOMKilled crash loop, and the stuck sync job (trigger and recover). It does the same as the scripts below, and you can mix the two: the page shows the current state, whichever way it was changed. It refreshes every 5 seconds. Switching slow checkout, slow login, discount query storm, CPU starvation or failing payments restarts the service, so the page shows "restarting" for a few seconds.
 
 Each switch writes a log line such as `scenario slow-checkout: on` from `scenario-control`, so in Dash0 you can see exactly when each scenario started.
 
@@ -482,6 +482,37 @@ The script patches only the container's CPU limit, which rolls out a new pod, ju
 ```
 
 Re-applying `pricing-py/` also removes the limit.
+
+### 11. Discount query storm: more load, same latency (optional)
+
+Not every regression is slow. Here a change makes checkout run nine database queries where it used to run one, and almost nothing gets slower, so latency-based alerts stay quiet. The extra load lands on the database and grows with traffic.
+
+Every checkout looks up the best active discount in a `checkout.discounts` span on shop-php, which records how many queries it took in `discount.queries`. Normally it's one query:
+
+```sql
+SELECT code, percent_off FROM discounts WHERE active = 1 AND min_subtotal_cents <= ? ORDER BY percent_off DESC LIMIT 1
+```
+
+**Trigger:**
+
+```sh
+./shop-php/discount-storm.sh on
+```
+
+The script sets `DISCOUNT_QUERY_PER_CODE: "true"` in `shop-php-flags` and restarts shop-php. Checkout then fetches the active codes with `SELECT code FROM discounts WHERE active = 1` and looks each of the eight codes up separately with `SELECT … FROM discounts WHERE code = ?`: a classic N+1 query. The discount and the total come out the same.
+
+**What to show in Dash0:**
+- **Spot it across all requests:** chart the count of shop-php database spans over time, grouped by `db.query.text`. The `… WHERE code = ?` query appears from the moment of the switch at eight times the checkout rate, and the old single query disappears. Checkout's request rate and latency (`POST /checkout` and `GET /checkout`) barely move.
+- **Compare before and after:** open a checkout trace from before the switch and one from after. Under `checkout.discounts` there's one database span before and nine after, with `discount.queries` = 1 and 9. Filtering or grouping `checkout.discounts` spans by `discount.queries` splits the two populations cleanly.
+- **Who is affected:** the browser's `POST /api/checkout` spans are still fast, so shoppers don't notice. That's the point: the change is invisible to latency SLOs and only shows up as volume.
+
+**Reset:**
+
+```sh
+./shop-php/discount-storm.sh off
+```
+
+With Argo CD, the flag ConfigMap's data is in `ignoreDifferences` (see "Deploy with Kustomize or Argo CD"), so a sync doesn't add this new key to an existing ConfigMap. That's fine: a missing key means off, and the script or the panel adds it.
 
 ## Synthetic checks
 
